@@ -1,0 +1,6 @@
+---
+- name: Setup Cluster
+  hosts: all
+  become: true
+  roles:
+    - { role: thunderbolt }

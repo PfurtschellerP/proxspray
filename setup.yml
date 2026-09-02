@@ -1,0 +1,3 @@
+---
+- name: Setup cluster
+  ansible.builtin.import_playbook: playbooks/setup.yml
