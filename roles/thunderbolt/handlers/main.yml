@@ -1,0 +1,9 @@
+---
+- name: Restart systemd-networkd
+  ansible.builtin.systemd:
+    name: systemd-networkd
+    state: restarted
+
+- name: Reload ifconfig
+  ansible.builtin.command: ifreload -a
+  changed_when: true

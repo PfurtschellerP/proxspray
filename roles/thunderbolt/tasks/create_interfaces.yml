@@ -1,0 +1,42 @@
+---
+# TODO: Updating initramfs required?
+- name: Install kernel modules
+  community.general.modprobe:
+    name: '{{ module_name }}'
+    state: present
+    persistent: present
+  loop:
+    - thunderbolt
+    - thunderbolt-net
+  loop_control:
+    loop_var: module_name
+
+- name: Enable systemd-networkd service
+  ansible.builtin.systemd:
+    name: systemd-networkd
+    enabled: true
+
+- name: Create systemd link files for consistent interface naming
+  ansible.builtin.template:
+    src: 'thunderbolt.link.j2'
+    dest: '/etc/systemd/network/00-{{ interface.key }}.link'
+    mode: '0644'
+  loop: '{{ thunderbolt_devices | dict2items }}'
+  loop_control:
+    loop_var: interface
+  notify:
+    - Restart systemd-networkd
+
+# TODO: Reboot required at this point or is the systemd-networkd restart enough?
+# - name: Reboot, if required
+#   ansible.builtin.reboot:
+#     reboot_timeout: 300
+
+- name: Verify Thunderbolt interfaces are present
+  ansible.builtin.command: ip link show {{ interface_name }}
+  changed_when: false
+  loop:
+    - en05
+    - en06
+  loop_control:
+    loop_var: interface_name
