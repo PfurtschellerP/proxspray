@@ -15,12 +15,12 @@ done
 
 # Configure interfaces if they exist
 if ip link show en05 &>/dev/null; then
-    /usr/local/bin/pve-en05.sh
+    /usr/local/bin/thunderbolt-en05.sh
     echo "$(date): en05 configured"
 fi
 
 if ip link show en06 &>/dev/null; then
-    /usr/local/bin/pve-en06.sh
+    /usr/local/bin/thunderbolt-en06.sh
     echo "$(date): en06 configured"
 fi
 
