@@ -1,0 +1,4 @@
+---
+certificates_node: "{{ ansible_facts.hostname }}"
+certificates_now: "{{ now(utc=true).timestamp() | int }}"
+certificates_min_notafter: "{{ certificates_now | int + certificates_min_validity_days | int * 86400 }}"

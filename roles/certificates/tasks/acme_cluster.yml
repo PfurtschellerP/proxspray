@@ -1,0 +1,45 @@
+---
+# Cluster-wide objects (stored in /etc/pve/priv/acme): configured from one node.
+# The community.proxmox modules use the local API backend (no api_host), so no
+# credentials are needed when running as root on the node.
+
+- name: Get the ACME terms of service
+  ansible.builtin.command:
+    argv: [pvesh, get, /cluster/acme/tos, --directory, "{{ certificates_acme_directory }}", --output-format, json]
+  register: certificates_acme_tos
+  changed_when: false
+  check_mode: false
+  run_once: true
+
+# Registering the account accepts the terms of service of the ACME directory.
+- name: Configure ACME account {{ certificates_acme_account }}
+  community.proxmox.proxmox_acme_account:
+    name: "{{ certificates_acme_account }}"
+    contact: "{{ certificates_acme_email }}"
+    directory: "{{ certificates_acme_directory }}"
+    tos: "{{ (certificates_acme_tos.stdout | from_json) or omit }}"
+  register: certificates_acme_account_result
+  run_once: true
+
+# The API cannot change the directory of an existing account.
+- name: Assert that the ACME account uses the configured directory
+  ansible.builtin.assert:
+    that: certificates_acme_account_result.directory | default('', true) in ['', certificates_acme_directory]
+    fail_msg: >-
+      ACME account '{{ certificates_acme_account }}' is registered with
+      {{ certificates_acme_account_result.directory }}. The directory of an account cannot be changed:
+      deactivate it (pvenode acme account deactivate) or use another account name.
+    quiet: true
+  run_once: true
+
+- name: Configure ACME DNS plugins
+  community.proxmox.proxmox_acme_plugin_dns:
+    name: "{{ certificates_plugin.id }}"
+    plugin: "{{ certificates_plugin.api }}"
+    data: "{{ certificates_plugin.data }}"
+    validation_delay: "{{ certificates_plugin.validation_delay | default(omit) }}"
+  run_once: true
+  loop: "{{ certificates_acme_plugins }}"
+  loop_control:
+    loop_var: certificates_plugin
+    label: "{{ certificates_plugin.id }}"

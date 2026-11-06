@@ -1,0 +1,3 @@
+---
+major_changes:
+  - certificates - new role for the web interface and API certificates. ``self_signed`` (default) uses the certificates issued by the cluster CA, regenerates them when they expire soon or miss the node's names and can fetch ``pve-root-ca.pem``. ``acme`` registers an ACME account, configures DNS plugins and node domains and orders certificates with the ``community.proxmox`` ACME modules (local API, no credentials needed); Proxmox VE renews them automatically.

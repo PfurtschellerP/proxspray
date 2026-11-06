@@ -1,0 +1,43 @@
+---
+# self_signed: use the certificates Proxmox VE issues from the cluster's own CA
+#   (pve-root-ca). Custom certificates and ACME settings are removed.
+# acme: order certificates via ACME (e.g. Let's Encrypt) with Proxmox VE's
+#   built-in client, which also renews them automatically.
+certificates_mode: self_signed
+
+# Renew/regenerate certificates that expire within this many days.
+certificates_min_validity_days: 30
+
+# --- self_signed ------------------------------------------------------------
+
+# Copy the cluster CA to the controller so you can add it to your trust store.
+certificates_fetch_ca: false
+certificates_fetch_ca_dest: "{{ inventory_dir }}/artifacts/pve-root-ca.pem"
+
+# --- acme -------------------------------------------------------------------
+
+# ACME account, shared by the whole cluster.
+certificates_acme_account: default
+certificates_acme_email: ""
+# Let's Encrypt staging: https://acme-staging-v02.api.letsencrypt.org/directory
+certificates_acme_directory: https://acme-v02.api.letsencrypt.org/directory
+
+# DNS challenge plugins, shared by the whole cluster. `api` is the acme.sh DNS
+# API name, `data` a dict of its credentials, `validation_delay` defaults to 30
+# seconds. Configured with community.proxmox.proxmox_acme_plugin_dns. See
+# https://pve.proxmox.com/wiki/Certificate_Management#sysadmin_certs_acme_dns_challenge
+# Example:
+#   - id: cloudflare
+#     api: cf
+#     data:
+#       CF_Token: "{{ vault_cloudflare_token }}"
+#       CF_Account_ID: "..."
+#     validation_delay: 30   # optional, seconds
+certificates_acme_plugins: []
+
+# Domains of this node's certificate (max. 5). Without a plugin, the HTTP
+# challenge is used, which needs port 80 of the node reachable from the ACME
+# server.
+certificates_acme_domains:
+  - domain: "{{ ansible_facts.fqdn }}"
+    plugin: "{{ (certificates_acme_plugins | first).id if certificates_acme_plugins | length > 0 else '' }}"

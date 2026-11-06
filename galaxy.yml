@@ -20,6 +20,7 @@ tags:
 dependencies:
   community.general: ">=13.0.0"
   ansible.posix: ">=2.0.0"
+  community.proxmox: ">=2.0.0"
 
 repository: https://github.com/PfurtschellerP/proxspray
 documentation: https://galaxy.ansible.com/ui/repo/published/pfurtschellerp/proxspray/

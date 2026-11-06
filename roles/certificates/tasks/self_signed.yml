@@ -1,0 +1,43 @@
+---
+- name: Remove ACME settings from the node configuration
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - set
+      - /nodes/{{ certificates_node }}/config
+      - --delete
+      - "{{ certificates_config.keys() | select('match', '^acme') | join(',') }}"
+  changed_when: true
+  when: certificates_config.keys() | select('match', '^acme') | list | length > 0
+
+# pveproxy-ssl.pem only exists for custom (uploaded or ACME) certificates;
+# without it pveproxy uses pve-ssl.pem, issued by the cluster CA.
+- name: Remove custom certificate
+  ansible.builtin.command: pvenode cert delete --restart 1
+  changed_when: true
+  when: "'pveproxy-ssl.pem' in certificates_san"
+
+- name: Check the node certificate
+  vars:
+    certificates_names: >-
+      {{ certificates_san['pve-ssl.pem'] | default([]) | map('regex_replace', '^(DNS|IP Address|IP):', '') | list }}
+  ansible.builtin.set_fact:
+    certificates_regenerate: >-
+      {{ 'pve-ssl.pem' not in certificates_san
+         or certificates_notafter['pve-ssl.pem'] | int < certificates_min_notafter | int
+         or ansible_facts.hostname not in certificates_names
+         or ansible_facts.fqdn not in certificates_names }}
+
+- name: Regenerate the node certificate
+  ansible.builtin.command: pvecm updatecerts --force
+  changed_when: true
+  when: certificates_regenerate | bool
+  notify: Restart pveproxy
+
+- name: Fetch the cluster CA certificate
+  ansible.builtin.fetch:
+    src: /etc/pve/pve-root-ca.pem
+    dest: "{{ certificates_fetch_ca_dest }}"
+    flat: true
+  run_once: true
+  when: certificates_fetch_ca | bool
