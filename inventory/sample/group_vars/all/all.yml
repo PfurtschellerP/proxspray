@@ -1,0 +1,48 @@
+---
+# Commonly changed settings. Every role variable with its default and a short
+# description is listed in roles/<role>/defaults/main.yml.
+
+## Proxmox VE (roles/proxmox)
+# proxmox_repository: no-subscription        # enterprise | no-subscription | test
+# proxmox_ceph_repository: no-subscription   # enterprise | no-subscription | test | none
+# proxmox_ceph_release: tentacle
+# proxmox_apt_upgrade: false
+# proxmox_timezone: Europe/Vienna
+# proxmox_ntp_servers: []
+# proxmox_packages: []
+# proxmox_remove_subscription_nag: false
+
+## Thunderbolt links (roles/thunderbolt)
+# thunderbolt_devices:
+#   en05:
+#     pci_path: "pci-0000:00:0d.2"
+#   en06:
+#     pci_path: "pci-0000:00:0d.3"
+# thunderbolt_mtu: 65520
+
+## Routed mesh over Thunderbolt (roles/fabric)
+# fabric_name: tbmesh
+# fabric_ip_prefix: 10.100.0.0/24            # node router IDs: 10.100.0.<node_id>
+# fabric_corosync_link: true                 # corosync link 1, management stays link 0 (preferred)
+# fabric_migration_network: true
+# fabric_migration_type: secure              # insecure: faster, unencrypted
+
+## Cluster (roles/cluster)
+# cluster_name: proxspray
+# cluster_init_node: node-1
+
+## Certificates (roles/certificates)
+# certificates_mode: self_signed             # self_signed | acme
+# certificates_fetch_ca: false               # copy pve-root-ca.pem to <inventory>/artifacts/
+#
+# certificates_mode: acme
+# certificates_acme_email: admin@example.com
+# certificates_acme_directory: https://acme-staging-v02.api.letsencrypt.org/directory
+# certificates_acme_plugins:
+#   - id: cloudflare
+#     api: cf
+#     data:
+#       CF_Token: "{{ vault_cloudflare_token }}"
+# certificates_acme_domains:                 # defaults to the node's FQDN
+#   - domain: "{{ inventory_hostname }}.example.com"
+#     plugin: cloudflare
