@@ -1,0 +1,46 @@
+---
+# Address other nodes use to reach this node (management network). Written to
+# /etc/hosts of the other nodes and expected to be what this node's hostname
+# resolves to, as required by Proxmox VE clustering.
+proxmox_node_ip: "{{ node_ip | default(ansible_facts.default_ipv4.address) }}"
+
+# Add all other nodes of the inventory to /etc/hosts.
+proxmox_manage_hosts: true
+
+# Proxmox VE package repository: enterprise, no-subscription or test.
+proxmox_repository: no-subscription
+
+# Ceph package repository: enterprise, no-subscription, test or none
+# (none removes the Ceph repository).
+proxmox_ceph_repository: "{{ proxmox_repository }}"
+proxmox_ceph_release: tentacle
+
+# Legacy one-line style repository files (Proxmox VE 8 and earlier) to remove;
+# they would point to the old Debian release or duplicate the deb822 sources.
+proxmox_legacy_apt_files:
+  - /etc/apt/sources.list.d/pve-enterprise.list
+  - /etc/apt/sources.list.d/pve-no-subscription.list
+  - /etc/apt/sources.list.d/pve-install-repo.list
+  - /etc/apt/sources.list.d/pvetest.list
+  - /etc/apt/sources.list.d/ceph.list
+
+# Subscription key of this node (set it per host, keys are bound to a node).
+# Required for the enterprise repositories.
+proxmox_subscription_key: ""
+
+# Run `apt full-upgrade` (Proxmox VE must be upgraded with full-upgrade).
+proxmox_apt_upgrade: false
+
+# Additional packages to install.
+proxmox_packages: []
+
+# Timezone such as "Europe/Vienna"; leave empty to keep the current one.
+proxmox_timezone: ""
+
+# NTP servers for chrony. Empty keeps the distribution's default pool.
+# Corosync and Ceph need tightly synchronised clocks.
+proxmox_ntp_servers: []
+
+# Hide the "No valid subscription" dialog in the web interface. The patch is
+# re-applied by an APT hook whenever proxmox-widget-toolkit is updated.
+proxmox_remove_subscription_nag: false

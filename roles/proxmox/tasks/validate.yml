@@ -1,0 +1,31 @@
+---
+- name: Validate role variables
+  ansible.builtin.assert:
+    that:
+      - proxmox_repository in ['enterprise', 'no-subscription', 'test']
+      - proxmox_ceph_repository in ['enterprise', 'no-subscription', 'test', 'none']
+      - proxmox_ceph_release is match('^[a-z]+$')
+      - proxmox_packages is sequence and proxmox_packages is not string
+      - proxmox_ntp_servers is sequence and proxmox_ntp_servers is not string
+      - proxmox_node_ip | length > 0
+    fail_msg: >-
+      Invalid proxmox role variables: proxmox_repository must be enterprise, no-subscription or test,
+      proxmox_ceph_repository one of those or none, proxmox_packages and proxmox_ntp_servers lists.
+    quiet: true
+
+- name: Check that Proxmox VE is installed
+  ansible.builtin.stat:
+    path: /usr/bin/pveversion
+  register: proxmox_pveversion
+
+- name: Assert that the host runs Proxmox VE 9 on Debian 13
+  ansible.builtin.assert:
+    that:
+      - proxmox_pveversion.stat.exists
+      - ansible_facts.distribution == 'Debian'
+      - ansible_facts.distribution_major_version == '13'
+    fail_msg: >-
+      {{ inventory_hostname }} must run Proxmox VE 9 (Debian 13 "trixie"), found
+      {{ ansible_facts.distribution }} {{ ansible_facts.distribution_version }}
+      {{ '' if proxmox_pveversion.stat.exists else 'without Proxmox VE' }}.
+    quiet: true

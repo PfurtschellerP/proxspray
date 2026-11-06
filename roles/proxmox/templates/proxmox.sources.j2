@@ -1,0 +1,10 @@
+{{ ansible_managed | comment }}
+Types: deb
+{% if proxmox_repository == 'enterprise' %}
+URIs: https://enterprise.proxmox.com/debian/pve
+{% else %}
+URIs: http://download.proxmox.com/debian/pve
+{% endif %}
+Suites: {{ ansible_facts.distribution_release }}
+Components: pve-{{ proxmox_repository }}
+Signed-By: /usr/share/keyrings/proxmox-archive-keyring.gpg

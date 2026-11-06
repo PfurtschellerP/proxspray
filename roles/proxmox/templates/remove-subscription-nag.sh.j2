@@ -1,0 +1,11 @@
+#!/bin/sh
+{{ ansible_managed | comment }}
+# Hides the "No valid subscription" dialog of the web interface. Called by the
+# APT hook 90proxspray-no-subscription-nag after every dpkg run, because
+# proxmox-widget-toolkit updates restore the original file.
+set -eu
+js={{ proxmox_widget_toolkit_js }}
+if [ -s "$js" ] && ! grep -qF NoMoreNagging "$js"; then
+    sed -i '/data\.status.*{/{s/!//;s/active/NoMoreNagging/}' "$js"
+    echo patched
+fi

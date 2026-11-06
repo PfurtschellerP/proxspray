@@ -1,0 +1,3 @@
+---
+major_changes:
+  - proxmox - new role for the essential node configuration - Proxmox VE and Ceph repositories (deb822, enterprise, no-subscription or test), subscription key, package installation and optional full upgrade, ``/etc/hosts`` entries for all nodes, a check that the hostname resolves to the node IP, timezone, chrony NTP servers and an optional removal of the subscription notice.
