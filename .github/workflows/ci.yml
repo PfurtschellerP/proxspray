@@ -1,0 +1,123 @@
+---
+name: CI
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PY_COLORS: "1"
+  ANSIBLE_FORCE_COLOR: "1"
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: .devcontainer/requirements.txt
+
+      - name: Install tools
+        run: |
+          pip install -r .devcontainer/requirements.txt
+          ansible-galaxy collection install -r .devcontainer/requirements.yml
+
+      - name: yamllint
+        run: yamllint --format github .
+
+      - name: ansible-lint
+        run: ansible-lint
+
+      - name: Lint changelog fragments
+        run: antsibull-changelog lint
+
+  syntax:
+    name: Build and syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: .devcontainer/requirements.txt
+
+      - name: Install tools
+        run: |
+          pip install -r .devcontainer/requirements.txt
+          ansible-galaxy collection install -r .devcontainer/requirements.yml
+
+      - name: Syntax check from the checkout
+        run: ansible-playbook -i inventory/sample/inventory.ini setup.yml --syntax-check
+
+      - name: Build collection
+        run: ansible-galaxy collection build --output-path dist
+
+      # Run from outside the checkout, so neither ansible.cfg nor roles/ can
+      # help: the playbook must resolve everything from the installed collection.
+      - name: Syntax check from the installed collection
+        working-directory: ${{ runner.temp }}
+        env:
+          ANSIBLE_COLLECTIONS_PATH: ${{ runner.temp }}/collections:~/.ansible/collections
+        run: |
+          ansible-galaxy collection install "$GITHUB_WORKSPACE"/dist/*.tar.gz -p "$RUNNER_TEMP/collections"
+          ansible-playbook -i "$GITHUB_WORKSPACE/inventory/sample/inventory.ini" \
+            pfurtschellerp.proxspray.setup --syntax-check
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: collection
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  sanity:
+    name: Sanity (${{ matrix.ansible }})
+    runs-on: ubuntu-latest
+    continue-on-error: ${{ matrix.ansible == 'devel' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        ansible:
+          - stable-2.19
+          - stable-2.20
+          - stable-2.21
+          - devel
+    steps:
+      - uses: ansible-community/ansible-test-gh-action@release/v1
+        with:
+          ansible-core-version: ${{ matrix.ansible }}
+          testing-type: sanity
+
+  changelog:
+    name: Changelog fragment
+    if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-changelog')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Require a changelog fragment
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if ! git diff --name-only --diff-filter=AM "$BASE_SHA"...HEAD | grep -q '^changelogs/fragments/.*\.ya\?ml$'; then
+            echo "::error::Add a changelog fragment to changelogs/fragments/ (a 'trivial' section for changes" \
+              "that need no entry) or label the PR with skip-changelog."
+            exit 1
+          fi

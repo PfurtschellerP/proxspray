@@ -1,0 +1,62 @@
+---
+# Publishes a release when a tag "v<version>" matching galaxy.yml is pushed.
+# Prepare it with `antsibull-changelog release` (see README).
+name: Release
+
+"on":
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: Publish
+    runs-on: ubuntu-latest
+    # Holds the GALAXY_API_KEY secret; add protection rules as needed.
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: .devcontainer/requirements.txt
+
+      - name: Install tools
+        run: pip install -r .devcontainer/requirements.txt
+
+      - name: Check that the tag matches galaxy.yml
+        id: version
+        run: |
+          version=$(python -c 'import yaml; print(yaml.safe_load(open("galaxy.yml"))["version"])')
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match version ${version} in galaxy.yml"
+            exit 1
+          fi
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        run: |
+          antsibull-changelog lint
+          antsibull-changelog generate --only-latest --output-format md \
+            --output "$RUNNER_TEMP/notes.md" "${{ steps.version.outputs.version }}"
+
+      - name: Build collection
+        run: ansible-galaxy collection build --output-path dist
+
+      - name: Publish to Ansible Galaxy
+        env:
+          GALAXY_API_KEY: ${{ secrets.GALAXY_API_KEY }}
+        run: ansible-galaxy collection publish dist/*.tar.gz --api-key "$GALAXY_API_KEY"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.tar.gz \
+            --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
