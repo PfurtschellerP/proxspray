@@ -18,6 +18,10 @@
 # install_media_root_ssh_keys:
 #   - ssh-ed25519 AAAA... you@laptop
 
+## Reinstall from the plugged-in stick (roles/reinstall, reinstall.yml)
+# reinstall_update_media: true               # rewrite outdated sticks
+# reinstall_destroy_guests: false
+
 ## Proxmox VE (roles/proxmox)
 # proxmox_repository: no-subscription        # enterprise | no-subscription | test
 # proxmox_ceph_repository: no-subscription   # enterprise | no-subscription | test | none

@@ -1,0 +1,39 @@
+---
+# The reinstalled nodes rejoin with setup.yml under the same name, which
+# needs their old entries gone. Removing nodes is only safe once they are
+# reinstalled and can no longer come back with the old cluster configuration.
+- name: Remove the reinstalled nodes from the cluster
+  vars:
+    reinstall_status: "{{ reinstall_cluster_status.stdout | default('[]') | from_json }}"
+    reinstall_members: "{{ reinstall_status | selectattr('type', 'eq', 'node') | map(attribute='name') | list }}"
+  ansible.builtin.command:
+    argv:
+      - pvecm
+      - delnode
+      - "{{ reinstall_leaving_node }}"
+  loop: >-
+    {{ ansible_play_hosts_all | map('extract', hostvars) | map(attribute='reinstall_pve_node')
+       | select('in', reinstall_members) | list }}
+  loop_control:
+    loop_var: reinstall_leaving_node
+  delegate_to: "{{ reinstall_remaining_hosts | first }}"
+  run_once: true
+  changed_when: true
+  when:
+    - reinstall_remaining_hosts | length > 0
+    - not ansible_check_mode
+
+# Holds the old node's certificates and guest configurations.
+- name: Remove the configuration of the reinstalled nodes
+  ansible.builtin.file:
+    path: /etc/pve/nodes/{{ reinstall_leaving_node }}
+    state: absent
+  loop: "{{ ansible_play_hosts_all | map('extract', hostvars) | map(attribute='reinstall_pve_node') | list }}"
+  loop_control:
+    loop_var: reinstall_leaving_node
+  delegate_to: "{{ reinstall_remaining_hosts | first }}"
+  run_once: true
+  when:
+    - reinstall_remaining_hosts | length > 0
+    - reinstall_cluster_status.stdout | default('[]') | from_json | selectattr('type', 'eq', 'cluster') | list | length > 0
+    - not ansible_check_mode

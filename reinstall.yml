@@ -1,0 +1,3 @@
+---
+- name: Reinstall nodes
+  ansible.builtin.import_playbook: playbooks/reinstall.yml

@@ -1,0 +1,68 @@
+---
+# All sticks written from the same Proxmox VE ISO share their partition UUIDs,
+# so the entry follows whichever stick is plugged in; a new ISO version gets a
+# new entry.
+- name: Note the boot entries for the stick
+  ansible.builtin.set_fact:
+    reinstall_stale_entries: >-
+      {{ reinstall_boot_entries
+         | selectattr('1', 'eq', reinstall_boot_entry_label)
+         | rejectattr('2', 'search', reinstall_esp.partuuid, ignorecase=True)
+         | map(attribute='0') | list }}
+    reinstall_matching_entries: >-
+      {{ reinstall_boot_entries
+         | selectattr('1', 'eq', reinstall_boot_entry_label)
+         | selectattr('2', 'search', reinstall_esp.partuuid, ignorecase=True)
+         | map(attribute='0') | list }}
+
+- name: Remove outdated boot entries for the stick
+  ansible.builtin.command:
+    argv:
+      - efibootmgr
+      - --bootnum
+      - "{{ reinstall_stale_entry }}"
+      - --delete-bootnum
+  loop: "{{ reinstall_stale_entries }}"
+  loop_control:
+    loop_var: reinstall_stale_entry
+  changed_when: true
+
+# --create-only keeps the entry out of BootOrder, so the stick only boots when
+# it is selected with BootNext.
+- name: Add a boot entry for the stick
+  ansible.builtin.command:
+    argv:
+      - efibootmgr
+      - --create-only
+      - --disk
+      - "{{ reinstall_stick.path }}"
+      - --part
+      - "{{ reinstall_esp.partn }}"
+      - --label
+      - "{{ reinstall_boot_entry_label }}"
+      - --loader
+      - "{{ reinstall_loader }}"
+  when: reinstall_matching_entries | length == 0
+  register: reinstall_boot_entry_created
+  changed_when: true
+
+- name: Read the new boot entry
+  ansible.builtin.import_tasks: boot_entries.yml
+  when: reinstall_boot_entry_created is not skipped
+
+- name: Note the boot entry for the stick
+  ansible.builtin.set_fact:
+    reinstall_boot_entry: >-
+      {{ reinstall_boot_entries
+         | selectattr('1', 'eq', reinstall_boot_entry_label)
+         | selectattr('2', 'search', reinstall_esp.partuuid, ignorecase=True)
+         | map(attribute='0') | first | default('') }}
+
+- name: Assert that the stick has a boot entry
+  ansible.builtin.assert:
+    that: reinstall_boot_entry | length == 4
+    fail_msg: >-
+      No UEFI boot entry '{{ reinstall_boot_entry_label }}' for {{ reinstall_esp.path }} on {{ inventory_hostname }};
+      check `efibootmgr --verbose`.
+    quiet: true
+  when: not ansible_check_mode
