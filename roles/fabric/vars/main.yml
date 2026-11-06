@@ -1,0 +1,6 @@
+---
+fabric_ip_base: "{{ fabric_ip_prefix | regex_replace('^(\\d+\\.\\d+\\.\\d+)\\..*$', '\\1') }}"
+fabric_dummy_interface: "dummy_{{ fabric_name }}"
+fabric_retries: "{{ (fabric_verify_timeout | int / 5) | round(0, 'ceil') | int }}"
+# Suffix of the interface property strings, e.g. "name=en05,hello_multiplier=3".
+fabric_interface_suffix: "{{ (',hello_multiplier=' ~ fabric_hello_multiplier) if fabric_hello_multiplier | string | length > 0 else '' }}"

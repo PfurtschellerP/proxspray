@@ -1,0 +1,76 @@
+---
+- name: Validate fabric variables
+  ansible.builtin.assert:
+    that:
+      - fabric_name is match('^[a-zA-Z0-9][a-zA-Z0-9-]{0,6}[a-zA-Z0-9]$')
+      - fabric_ip_prefix is match('^(\d{1,3}\.){3}\d{1,3}/([0-9]|[12][0-9]|3[0-2])$')
+      - fabric_interfaces | length > 0
+      - fabric_interfaces | select('match', '^[A-Za-z0-9_.-]{1,15}$') | list | length == fabric_interfaces | length
+      - fabric_hello_interval | int in range(1, 601)
+      - fabric_csnp_interval | int in range(1, 601)
+      - fabric_hello_multiplier | string | length == 0 or fabric_hello_multiplier | int in range(2, 101)
+      - fabric_corosync_linknumber | int in range(1, 8)
+      - fabric_migration_type in ['secure', 'insecure']
+    fail_msg: >-
+      Invalid fabric configuration: fabric_name must be 2-8 letters, digits or '-', fabric_ip_prefix a
+      CIDR, fabric_interfaces a list of interface names, the timers between 1 and 600,
+      fabric_hello_multiplier empty or 2-100, fabric_corosync_linknumber 1-7 and
+      fabric_migration_type secure or insecure.
+    quiet: true
+
+# Every node computes the same list from the inventory, so the cluster-wide
+# configuration covers all nodes even when the run is limited.
+- name: Reset the list of fabric nodes
+  ansible.builtin.set_fact:
+    fabric_nodes: []
+
+- name: Collect fabric nodes
+  vars:
+    fabric_host_vars: "{{ hostvars[fabric_host] }}"
+  ansible.builtin.set_fact:
+    fabric_nodes: >-
+      {{ fabric_nodes + [{
+           'host': fabric_host,
+           'name': fabric_host_vars.ansible_facts.hostname,
+           'ip': fabric_host_vars.fabric_router_id | default(fabric_ip_base ~ '.' ~ (fabric_host_vars.node_id | default(''))),
+           'interfaces': fabric_host_vars.fabric_interfaces | default(fabric_interfaces) | sort,
+         }] }}
+  loop: "{{ groups['all'] }}"
+  loop_control:
+    loop_var: fabric_host
+
+- name: Set this node's fabric settings
+  ansible.builtin.set_fact:
+    fabric_self: "{{ fabric_nodes | selectattr('host', 'eq', inventory_hostname) | first }}"
+    fabric_peers: "{{ fabric_nodes | rejectattr('host', 'eq', inventory_hostname) | list }}"
+
+- name: Validate router IDs
+  vars:
+    fabric_ips: "{{ fabric_nodes | map(attribute='ip') | list }}"
+  ansible.builtin.assert:
+    that:
+      - fabric_ips | select('match', '^(\d{1,3}\.){3}\d{1,3}$') | list | length == fabric_ips | length
+      - fabric_ips | unique | length == fabric_ips | length
+    fail_msg: >-
+      Every node needs a unique router ID, set node_id (or fabric_router_id) per host.
+      Got: {{ dict(fabric_nodes | map(attribute='host') | zip(fabric_ips)) }}.
+    quiet: true
+
+- name: Validate node names
+  vars:
+    fabric_names: "{{ fabric_nodes | map(attribute='name') | list }}"
+  ansible.builtin.assert:
+    that: fabric_names | unique | length == fabric_names | length
+    fail_msg: "Every node needs a unique hostname, got: {{ dict(fabric_nodes | map(attribute='host') | zip(fabric_names)) }}."
+    quiet: true
+
+- name: Check that the cluster exists
+  ansible.builtin.stat:
+    path: /etc/pve/corosync.conf
+  register: fabric_corosync_conf
+
+- name: Assert that the cluster exists
+  ansible.builtin.assert:
+    that: fabric_corosync_conf.stat.exists or groups['all'] | length == 1
+    fail_msg: The SDN fabric is cluster-wide configuration; create the cluster first (cluster role).
+    quiet: true

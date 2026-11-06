@@ -1,0 +1,43 @@
+---
+# Routed full mesh over the Thunderbolt links, built with a Proxmox VE SDN
+# OpenFabric fabric. Every node gets one /32 address (its router ID) that the
+# other nodes reach over the best available Thunderbolt path, also via the
+# third node if a cable fails. Use these addresses for Ceph, migration and
+# corosync.
+
+# Fabric name: 2-8 letters, digits or '-'.
+fabric_name: tbmesh
+
+# Network of the router IDs.
+fabric_ip_prefix: 10.100.0.0/24
+
+# Router ID of this node. Defaults to <first three octets of fabric_ip_prefix>.<node_id>.
+fabric_router_id: "{{ fabric_ip_base }}.{{ node_id | default('') }}"
+
+# Interfaces the node peers on. Defaults to the Thunderbolt interfaces.
+fabric_interfaces: "{{ (thunderbolt_devices | default({'en05': {}, 'en06': {}})).keys() | sort }}"
+
+# OpenFabric timers in seconds. Lower values detect failed links faster at the
+# cost of a little more control traffic (Proxmox VE defaults: 3 and 10).
+fabric_hello_interval: 1
+fabric_csnp_interval: 2
+# Missed hellos before a neighbour is considered down (2-100, empty: Proxmox VE default of 10).
+fabric_hello_multiplier: ""
+
+# Add the fabric as an additional corosync link. Link 0 (management network)
+# keeps priority; the fabric link is only used when it fails.
+fabric_corosync_link: true
+fabric_corosync_linknumber: 1
+
+# Send live migration traffic over the fabric. "insecure" skips the SSH tunnel
+# and is much faster, but sends memory contents unencrypted over the mesh.
+fabric_migration_network: true
+fabric_migration_type: secure
+
+# Check routes and reachability of all other nodes after applying the fabric.
+fabric_verify: true
+# Also send unfragmented pings of the full MTU size.
+fabric_verify_mtu: true
+fabric_mtu: "{{ thunderbolt_mtu | default(65520) }}"
+# Seconds to wait for the fabric to converge.
+fabric_verify_timeout: 90

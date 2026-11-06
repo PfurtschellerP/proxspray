@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  author: Patrick Pfurtscheller
+  description: Routed full mesh over Thunderbolt with a Proxmox VE SDN OpenFabric fabric, used for corosync and migration
+  license: GPL-3.0-or-later
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+  galaxy_tags:
+    - proxmox
+    - sdn
+    - openfabric
+
+dependencies: []

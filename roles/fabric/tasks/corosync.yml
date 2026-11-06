@@ -1,0 +1,38 @@
+---
+# No knet priorities are set, so corosync prefers the lowest link number:
+# link 0 on the management network carries the traffic while it is up.
+- name: Add the fabric as corosync link {{ fabric_corosync_linknumber }}
+  ansible.builtin.script:
+    cmd: >-
+      corosync_link.py --linknumber {{ fabric_corosync_linknumber | int }}
+      {% for node in fabric_nodes %}--address {{ (node.name ~ '=' ~ node.ip) | quote }} {% endfor %}
+      {{ '--check' if ansible_check_mode else '' }}
+    executable: /usr/bin/python3
+  register: fabric_corosync
+  changed_when: (fabric_corosync.stdout | from_json).changed
+  failed_when: fabric_corosync.rc != 0
+  check_mode: false
+  run_once: true
+
+- name: Assert that the management network stays the preferred corosync link
+  ansible.builtin.assert:
+    that: (fabric_corosync.stdout | from_json).preferred_link == 0
+    fail_msg: >-
+      Corosync prefers link {{ (fabric_corosync.stdout | from_json).preferred_link }}, not link 0 on the management
+      network. Check the knet_link_priority settings in /etc/pve/corosync.conf.
+    quiet: true
+  run_once: true
+
+- name: Wait for the fabric corosync link to connect to all other nodes
+  ansible.builtin.command: corosync-cfgtool -s
+  register: fabric_corosync_status
+  changed_when: false
+  check_mode: false
+  vars:
+    fabric_link_section: >-
+      {{ fabric_corosync_status.stdout
+         | regex_search('LINK ID ' ~ fabric_corosync_linknumber ~ '\b[^\n]*(\n[ \t][^\n]*)*') | default('', true) }}
+  until: fabric_link_section | regex_findall(':\s+connected') | length >= fabric_peers | length
+  retries: "{{ fabric_retries }}"
+  delay: 5
+  when: not ansible_check_mode
