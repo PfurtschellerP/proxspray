@@ -12,10 +12,14 @@
 # shellcheck source=/dev/null
 source /usr/lib/git-core/git-sh-prompt
 
-GIT_PS1_SHOWDIRTYSTATE=1
-GIT_PS1_SHOWUNTRACKEDFILES=1
-GIT_PS1_SHOWUPSTREAM=auto
-GIT_PS1_SHOWCOLORHINTS=1
+# Read by __git_ps1, which shellcheck cannot see.
+# shellcheck disable=SC2034
+{
+    GIT_PS1_SHOWDIRTYSTATE=1
+    GIT_PS1_SHOWUNTRACKEDFILES=1
+    GIT_PS1_SHOWUPSTREAM=auto
+    GIT_PS1_SHOWCOLORHINTS=1
+}
 
 __proxspray_prompt() {
     local status=$?
