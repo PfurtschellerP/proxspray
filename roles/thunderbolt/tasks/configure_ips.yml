@@ -26,3 +26,10 @@
           mtu 65520
   notify:
     - Reload ifconfig
+
+- name: Test ICMP ping to other nodes to test connectivity
+  ansible.builtin.command: ping -c 3 {{ host }}
+  changed_when: false
+  loop: '{{ thunderbolt_ping_targets[node_id] }}'
+  loop_control:
+    loop_var: host

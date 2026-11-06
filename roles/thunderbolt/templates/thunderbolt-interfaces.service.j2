@@ -1,0 +1,13 @@
+{{ ansible_managed | comment }}
+[Unit]
+Description=Configure Thunderbolt Network Interfaces
+After=network.target thunderbolt.service
+Wants=network.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/thunderbolt-startup.sh
+
+[Install]
+WantedBy=multi-user.target

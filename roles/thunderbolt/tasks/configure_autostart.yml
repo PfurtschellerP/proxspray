@@ -1,0 +1,31 @@
+---
+- name: Template thunderbolt interface bringup scripts
+  ansible.builtin.template:
+    src: 'thunderbolt-enXX.sh.j2'
+    dest: '/usr/local/bin/thunderbolt-{{ interface }}.sh'
+    mode: '0755'
+  loop: '{{ thunderbolt_devices.keys() | list }}'
+  loop_control:
+    loop_var: interface
+
+- name: Template thunderbolt startup script
+  ansible.builtin.template:
+    src: 'thunderbolt-startup.sh.j2'
+    dest: '/usr/local/bin/thunderbolt-startup.sh'
+    mode: '0755'
+
+- name: Create udev rules for Thunderbolt devices
+  ansible.builtin.template:
+    src: 'thunderbolt.rules.j2'
+    dest: '/etc/udev/rules.d/10-thunderbolt.rules'
+    mode: '0644'
+  notify:
+    - Reload udev rules
+
+- name: Setup systemd service for Thunderbolt device management
+  ansible.builtin.template:
+    src: 'thunderbolt-interfaces.service.j2'
+    dest: '/etc/systemd/system/thunderbolt-interfaces.service'
+    mode: '0644'
+  notify:
+    - Systemd daemon reload

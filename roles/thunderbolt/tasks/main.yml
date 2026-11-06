@@ -5,9 +5,5 @@
 - name: Configure IPs
   ansible.builtin.import_tasks: configure_ips.yml
 
-- name: Test ICMP ping to other nodes to test connectivity
-  ansible.builtin.command: ping -c 3 {{ host }}
-  changed_when: false
-  loop: '{{ thunderbolt_ping_targets[node_id] }}'
-  loop_control:
-    loop_var: host
+- name: Configure Autostart for Thunderbolt interfaces
+  ansible.builtin.import_tasks: configure_autostart.yml
