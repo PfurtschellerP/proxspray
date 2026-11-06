@@ -1,17 +1,34 @@
 ---
-- name: Restart systemd-networkd
-  ansible.builtin.systemd:
-    name: systemd-networkd
-    state: restarted
+# Handlers run in the order they are listed here.
 
-- name: Reload ifconfig
-  ansible.builtin.command: ifreload -a
+# Interfaces that appeared before their .link file existed still carry the
+# kernel name (thunderbolt0, ...). A synthetic "add" event applies the link
+# files to them; the kernel only allows renaming interfaces that are down.
+- name: Apply Thunderbolt link files
+  ansible.builtin.shell: |
+    set -eu
+    udevadm control --reload
+    for dev in /sys/class/net/thunderbolt*; do
+      [ -e "$dev" ] || continue
+      ip link set dev "${dev##*/}" down
+      udevadm trigger --action=add "$dev"
+    done
+    udevadm settle --timeout=30
   changed_when: true
 
-- name: Systemd daemon reload
-  ansible.builtin.systemd:
+# The initramfs-tools udev hook copies .link files into the initramfs.
+- name: Update initramfs
+  ansible.builtin.command: update-initramfs -u -k all
+  changed_when: true
+
+- name: Reload systemd
+  ansible.builtin.systemd_service:
     daemon_reload: true
 
 - name: Reload udev rules
-  ansible.builtin.command: udevadm control --reload-rules
+  ansible.builtin.command: udevadm control --reload
+  changed_when: true
+
+- name: Reload network interfaces
+  ansible.builtin.command: ifreload -a
   changed_when: true

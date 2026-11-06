@@ -1,0 +1,24 @@
+---
+# Also required by Proxmox VE SDN, which writes the fabric addresses of these
+# interfaces to /etc/network/interfaces.d/sdn.
+- name: Make sure /etc/network/interfaces.d is sourced
+  ansible.builtin.lineinfile:
+    path: /etc/network/interfaces
+    regexp: '^\s*source(-directory)?\s+/etc/network/interfaces\.d'
+    line: source /etc/network/interfaces.d/*
+    insertafter: EOF
+    firstmatch: true
+  notify:
+    - Reload network interfaces
+
+# A separate file is not touched when the Proxmox GUI rewrites
+# /etc/network/interfaces. ifupdown2 merges it with the SDN stanzas.
+- name: Configure Thunderbolt interfaces
+  ansible.builtin.template:
+    src: interfaces.j2
+    dest: /etc/network/interfaces.d/proxspray-thunderbolt
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload network interfaces

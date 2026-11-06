@@ -1,0 +1,3 @@
+---
+major_changes:
+  - thunderbolt - new role that prepares the Thunderbolt links of each node - loads ``thunderbolt-net``, names the interfaces through systemd ``.link`` files (applied immediately via udev, initramfs updated), sets the MTU, brings interfaces up again after a cable replug or a late appearance at boot with a udev-triggered ``ifup`` unit, and checks that every link is up with the expected MTU.

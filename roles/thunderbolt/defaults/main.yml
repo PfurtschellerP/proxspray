@@ -1,33 +1,19 @@
 ---
-# Thunderbolt network devices (lspci | grep -i thunderbolt)
+# Thunderbolt network devices: interface name -> path of the Thunderbolt port
+# (ID_PATH as shown by `udevadm info /sys/class/net/thunderbolt0 | grep ID_PATH`,
+# the PCI address also shows up in `lspci | grep -i thunderbolt`).
+# Interface names must be at most 15 characters. The fabric role uses these
+# interfaces for the routed mesh.
 thunderbolt_devices:
   en05:
     pci_path: "pci-0000:00:0d.2"
   en06:
     pci_path: "pci-0000:00:0d.3"
 
-# Point-to-point networks for Thunderbolt interfaces
-# thunderbolt_n1_n2_network: "10.100.0.0/30"
-# thunderbolt_n2_n3_network: "10.100.0.4/30"
-# thunderbolt_n1_n3_network: "10.100.0.8/30"
-thunderbolt_p2p_ips:
-  1:
-    en05: "10.100.0.2/30" # n1 <-> n2
-    en06: "10.100.0.5/30" # n1 <-> n3
-  2:
-    en05: "10.100.0.1/30" # n2 <-> n1
-    en06: "10.100.0.9/30" # n2 <-> n3
-  3:
-    en05: "10.100.0.6/30" # n3 <-> n1
-    en06: "10.100.0.10/30" # n3 <-> n2
+# MTU of the Thunderbolt interfaces (65520 is the maximum of thunderbolt-net).
+thunderbolt_mtu: 65520
 
-thunderbolt_ping_targets:
-  1:
-    - "10.100.0.1"
-    - "10.100.0.6"
-  2:
-    - "10.100.0.2"
-    - "10.100.0.10"
-  3:
-    - "10.100.0.5"
-    - "10.100.0.9"
+# Check at the end of the role that every interface exists and has a link.
+thunderbolt_verify: true
+# Seconds to wait for the interfaces to come up.
+thunderbolt_verify_timeout: 60

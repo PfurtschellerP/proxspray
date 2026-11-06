@@ -1,9 +1,23 @@
 ---
-- name: Create interfaces for thunderbolt network devices
+- name: Validate Thunderbolt configuration
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Create interfaces for Thunderbolt network devices
   ansible.builtin.import_tasks: create_interfaces.yml
 
-- name: Configure IPs
-  ansible.builtin.import_tasks: configure_ips.yml
+- name: Configure Thunderbolt interfaces
+  ansible.builtin.import_tasks: configure_interfaces.yml
 
-- name: Configure Autostart for Thunderbolt interfaces
-  ansible.builtin.import_tasks: configure_autostart.yml
+- name: Configure hotplug handling for Thunderbolt interfaces
+  ansible.builtin.import_tasks: configure_hotplug.yml
+
+# Rename interfaces, reload udev/systemd and apply the network configuration
+# now, so that verification sees the final state.
+- name: Apply pending changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify Thunderbolt links
+  ansible.builtin.import_tasks: verify.yml
+  when:
+    - thunderbolt_verify | bool
+    - not ansible_check_mode

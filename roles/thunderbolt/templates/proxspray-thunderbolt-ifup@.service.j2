@@ -1,0 +1,16 @@
+{{ ansible_managed | comment }}
+# Started by udev (90-proxspray-thunderbolt.rules) when a Thunderbolt
+# interface appears and stopped together with the device when it vanishes.
+[Unit]
+Description=Bring up Thunderbolt network interface %i
+BindsTo=sys-subsystem-net-devices-%i.device
+After=sys-subsystem-net-devices-%i.device networking.service
+StartLimitIntervalSec=120
+StartLimitBurst=10
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/ifup %i
+Restart=on-failure
+RestartSec=3

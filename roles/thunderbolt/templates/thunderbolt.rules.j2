@@ -1,5 +1,6 @@
 {{ ansible_managed | comment }}
-# TB4 interface hotplug rules
-# Trigger bringup scripts when interfaces are renamed
-ACTION=="move", SUBSYSTEM=="net", KERNEL=="en05", RUN+="/usr/local/bin/thunderbolt-en05.sh"
-ACTION=="move", SUBSYSTEM=="net", KERNEL=="en06", RUN+="/usr/local/bin/thunderbolt-en06.sh"
+# Bring up Thunderbolt interfaces whenever they appear (boot, cable replug).
+# Sorted after 80-net-setup-link.rules, so NAME already holds the final name.
+{% for interface in thunderbolt_devices | sort %}
+ACTION=="add|move", SUBSYSTEM=="net", NAME=="{{ interface }}", TAG+="systemd", ENV{SYSTEMD_WANTS}+="proxspray-thunderbolt-ifup@{{ interface }}.service"
+{% endfor %}
