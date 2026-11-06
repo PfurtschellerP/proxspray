@@ -39,6 +39,7 @@ An Ansible collection (`pfurtschellerp.proxspray`) that turns three mini PCs int
 
 | Status | Feature |
 | :----: | ------- |
+| ✅ | Unattended installation: per-node installer ISOs generated from the inventory, reinstall from a plugged-in USB stick with a one-time UEFI boot |
 | ✅ | Proxmox VE essentials: deb822 repositories (enterprise / no-subscription / test), packages, `/etc/hosts`, timezone, NTP |
 | ✅ | Thunderbolt links: `thunderbolt-net` modules, stable `en05`/`en06` naming via systemd `.link` files, MTU, hotplug and boot-time bringup |
 | ✅ | Proxmox VE cluster creation and node join (over SSH, no root password needed) |
@@ -89,11 +90,41 @@ The commonly changed settings are listed in [inventory/sample/group_vars/all/all
 
 | Role | Purpose | Key variables |
 | ---- | ------- | ------------- |
+| [install_media](roles/install_media/defaults/main.yml) | Unattended installer ISO per node (runs on the controller) | `install_media_domain`, `install_media_gateway`, `install_media_dns`, `install_media_disk_list`, `install_media_root_password_hash`, `install_media_root_ssh_keys` |
+| [reinstall](roles/reinstall/defaults/main.yml) | Reinstall nodes from their plugged-in stick | `reinstall_confirm`, `reinstall_update_media`, `reinstall_destroy_guests` |
 | [proxmox](roles/proxmox/defaults/main.yml) | Repositories, packages, `/etc/hosts`, time | `proxmox_repository`, `proxmox_ceph_release`, `proxmox_timezone`, `proxmox_ntp_servers`, `proxmox_apt_upgrade` |
 | [cluster](roles/cluster/defaults/main.yml) | Create and join the cluster | `cluster_name`, `cluster_init_node`, `cluster_links` |
 | [thunderbolt](roles/thunderbolt/defaults/main.yml) | Thunderbolt links | `thunderbolt_devices` (interface → port path), `thunderbolt_mtu` |
 | [fabric](roles/fabric/defaults/main.yml) | Routed mesh, corosync link, migration network | `fabric_ip_prefix`, `fabric_corosync_link`, `fabric_migration_network`, `fabric_migration_type` |
 | [certificates](roles/certificates/defaults/main.yml) | Web interface / API certificates | `certificates_mode`, `certificates_acme_*` |
+
+### 💿 Installing the nodes
+
+No PXE and no DHCP changes: every node gets its own USB stick with an installer ISO built from the inventory (Proxmox VE [automated installation](https://pve.proxmox.com/wiki/Automated_Installation)). The ISO holds the node's FQDN, static address, target disk, root password hash and SSH keys and installs without a single keypress.
+
+```bash
+# 1. Build inventory/<cluster>/artifacts/install-media/<node>.iso for every node
+ansible-playbook -i inventory/mycluster/inventory.ini install_media.yml
+
+# 2. First installation: write each ISO to a stick, plug it in and pick it once in the boot menu
+sudo dd if=inventory/mycluster/artifacts/install-media/node-1.iso of=/dev/sdX bs=4M conv=fsync oflag=direct status=progress
+
+# 3. Configure the cluster
+ansible-playbook -i inventory/mycluster/inventory.ini setup.yml
+```
+
+Leave the sticks plugged in. Later reinstalls need no hands on the machines: `reinstall.yml` checks the stick, rewrites it if the ISO changed, adds a UEFI boot entry for it that is *not* in the boot order, selects it once with `BootNext` and reboots. The installer reboots into the new system, and the playbook waits for it:
+
+```bash
+ansible-playbook -i inventory/mycluster/inventory.ini reinstall.yml setup.yml -e reinstall_confirm=node-1,node-2,node-3
+```
+
+- **SSH host keys stay the same.** `install_media` takes the keys of the running nodes (or generates them) into `inventory/<cluster>/credentials/`, a first-boot hook restores them before sshd starts, and they are added to your `known_hosts`. Neither Ansible nor the other cluster nodes see a changed host key.
+- **Other disks:** the installer only touches its target disks. With `install_media_wipe_disks: true` the first boot also wipes every other disk except USB devices (partition tables and LVM, Ceph or ZFS signatures), e.g. to reuse a Ceph disk; it finds the system disks by what the new system uses, not by name.
+- **Network:** `install_media_interface_filter` selects the management port by udev properties, e.g. `{ID_NET_NAME_PATH: enp86s0}` once for identical machines, or by MAC with `node_mac` per host.
+- **Single nodes** can be reinstalled with `--limit`; the remaining nodes must keep quorum, and the old node is removed from the cluster before `setup.yml` joins it again.
+- **Safeguards:** `reinstall_confirm` must list exactly the selected nodes, nodes with guests are refused (`reinstall_destroy_guests`), and the firmware must boot the system disk first so the stick never boots by accident.
+- **Tools:** `proxmox-auto-install-assistant` and `xorriso` are in the Dev Container; elsewhere install them from the Proxmox VE repository. The ISOs and `credentials/` contain secrets and are git-ignored.
 
 ### 🕸️ Thunderbolt fabric
 
@@ -122,8 +153,12 @@ Try it against the Let's Encrypt staging directory first (`certificates_acme_dir
 ```
 .
 ├── setup.yml              # Entry point (imports playbooks/setup.yml)
+├── install_media.yml      # Build the per-node installer ISOs
+├── reinstall.yml          # Reinstall nodes from their plugged-in stick
 ├── playbooks/             # Playbooks, also available as pfurtschellerp.proxspray.<name>
 ├── roles/
+│   ├── install_media/     # Unattended installer ISOs (controller)
+│   ├── reinstall/         # One-time UEFI boot into the installer stick
 │   ├── proxmox/           # Node essentials
 │   ├── cluster/           # Cluster creation and join
 │   ├── thunderbolt/       # Thunderbolt links

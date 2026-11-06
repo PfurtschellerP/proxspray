@@ -31,6 +31,12 @@ formatting. This file only lists what the linters don't check.
 - Play order in `playbooks/setup.yml`: Ansible version check → facts of all
   nodes → `proxmox` → `cluster` → `thunderbolt` + `fabric` → `certificates`.
   Every role has a tag with its own name.
+- Other top-level playbooks follow the same pattern: `install_media.yml`
+  (runs on the controller, every task `delegate_to: localhost`) and
+  `reinstall.yml` (destructive, guarded by `reinstall_confirm`).
+- Generated files go to `<inventory>/artifacts/`, generated secrets to
+  `<inventory>/credentials/`; both are git-ignored and excluded from the
+  collection build.
 - `inventory/sample/` is the documented example; commonly changed settings are
   listed (commented out) in `inventory/sample/group_vars/all/all.yml`.
 
