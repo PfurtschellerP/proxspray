@@ -1,22 +1,25 @@
 {
-  "name": "ansible-dev-container",
+  "name": "proxspray",
   "build": {
-    "dockerfile": "Dockerfile",
-    "args": {
-      "WORKSPACE_DIR": "${containerWorkspaceFolder}"
-    }
+    "dockerfile": "Dockerfile"
   },
-  "containerUser": "root",
-  "mounts": [
-    "source=${localEnv:SSH_AUTH_SOCK},target=/tmp/ssh-auth.sock,type=bind"
-  ],
-  "remoteEnv": {
-    "SSH_AUTH_SOCK": "/tmp/ssh-auth.sock"
-  },
+  // Work as the image's non-root user instead of root.
+  "remoteUser": "vscode",
   "updateRemoteUserUID": true,
+  // Dev Containers forwards the host ssh-agent and copies ~/.gitconfig
+  // automatically, so no manual SSH_AUTH_SOCK mount is needed.
+  "postCreateCommand": "bash .devcontainer/post-create.sh",
   "customizations": {
     "vscode": {
-      "extensions": ["redhat.ansible"]
+      "extensions": ["redhat.ansible"],
+      "settings": {
+        "files.associations": {
+          "**/roles/**/*.yml": "ansible",
+          "**/playbooks/*.yml": "ansible",
+          "setup.yml": "ansible"
+        },
+        "ansible.validation.lint.enabled": true
+      }
     }
   }
 }

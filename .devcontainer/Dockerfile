@@ -1,20 +1,15 @@
-FROM python:3.14.7-slim
+# Official Dev Container base image: Debian 13 (trixie, same as Proxmox VE 9),
+# Python 3.14, git, openssh-client and a non-root "vscode" user.
+FROM mcr.microsoft.com/devcontainers/python:3.14-trixie
 
-ARG WORKSPACE_DIR=/workspaces/proxspray
+# Ansible tooling
+COPY requirements.txt /tmp/devcontainer/requirements.txt
+RUN pip3 install --disable-pip-version-check --no-cache-dir \
+        -r /tmp/devcontainer/requirements.txt
 
-ENV LANG=C.UTF-8
-ENV LC_ALL=C.UTF-8
-
-# Install Ansible and dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
-    ssh
-
-COPY requirements.txt /tmp/requirements.txt
-COPY requirements.yml /tmp/requirements.yml
-RUN pip3 install -r /tmp/requirements.txt
-RUN ansible-galaxy collection install -r /tmp/requirements.yml
-
-# Create a symlink to the workspace directory
-RUN mkdir -p /usr/share/ansible/collections/ansible_collections/pfurtschellerp
-RUN ln -s ${WORKSPACE_DIR} /usr/share/ansible/collections/ansible_collections/pfurtschellerp/proxyspray
+# Collection dependencies, installed system-wide so every user can see them
+COPY requirements.yml /tmp/devcontainer/requirements.yml
+RUN ansible-galaxy collection install \
+        -r /tmp/devcontainer/requirements.yml \
+        -p /usr/share/ansible/collections \
+    && rm -rf /tmp/devcontainer
