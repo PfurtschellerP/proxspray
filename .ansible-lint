@@ -1,0 +1,13 @@
+---
+profile: production
+
+exclude_paths:
+  - .ansible/
+  - .devcontainer/
+  - .github/
+  - changelogs/
+
+# Variables of the sample inventory are documented examples, not role variables.
+kinds:
+  - playbook: "playbooks/*.yml"
+  - playbook: "setup.yml"
