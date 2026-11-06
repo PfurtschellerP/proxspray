@@ -158,8 +158,11 @@ ansible-playbook -i inventory/sample/inventory.ini setup.yml --syntax-check
 
 `ansible-test sanity` needs the collection at
 `ansible_collections/pfurtschellerp/proxspray/`; CI runs it on every supported
-ansible-core version. Files in `roles/*/files/` must pass it as well (e.g. the
-shebang has to be `#!/usr/bin/env python`).
+ansible-core version. It checks every tracked file, including
+`.devcontainer/` scripts and `roles/*/files/` (e.g. the shebang has to be
+`#!/usr/bin/env python`). Without the `shellcheck` binary a local run skips
+that test with only a warning, so install it (e.g. `pip install shellcheck-py`)
+before relying on a local result.
 
 Template logic is tested locally by running the role's expressions against
 `localhost` with mocked command output; there are no Molecule tests because
