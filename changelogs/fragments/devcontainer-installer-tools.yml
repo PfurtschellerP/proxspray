@@ -1,0 +1,3 @@
+---
+trivial:
+  - Dev Container - install ``proxmox-auto-install-assistant`` and ``xorriso`` from the Proxmox VE repository and the ``community.crypto`` collection.
