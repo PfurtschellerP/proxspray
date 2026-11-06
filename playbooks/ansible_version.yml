@@ -1,0 +1,15 @@
+---
+- name: Check Ansible version
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars:
+    minimal_ansible_version: 2.19.0
+  tasks:
+    - name: Check Ansible version
+      ansible.builtin.assert:
+        that: ansible_version.string is version(minimal_ansible_version, '>=')
+        fail_msg: "Ansible {{ minimal_ansible_version }} or newer is required, found {{ ansible_version.string }}."
+        quiet: true
+      tags: always

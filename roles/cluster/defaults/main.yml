@@ -1,0 +1,25 @@
+---
+# Name of the Proxmox VE cluster (letters, digits and '-', max. 15 characters).
+# It cannot be changed once the cluster exists.
+cluster_name: proxspray
+
+# Node that creates the cluster; all other nodes join it. When the cluster
+# already exists, any member works.
+cluster_init_node: "{{ groups['all'] | first }}"
+
+# Address the joining nodes connect to (over SSH, as root) to join the cluster.
+cluster_join_address: >-
+  {{ hostvars[cluster_init_node].node_ip
+     | default(hostvars[cluster_init_node].ansible_host)
+     | default(cluster_init_node) }}
+
+# Corosync links of this node, in order (link0, link1, ...). Every entry is an
+# address or a property string such as "address=10.10.1.6,priority=10".
+# All nodes need the same number of links and each link's addresses must be
+# reachable from every node. The fabric role adds the Thunderbolt mesh as
+# link 1 (fabric_corosync_linknumber) once the cluster exists.
+cluster_links:
+  - "{{ node_ip | default(ansible_facts.default_ipv4.address) }}"
+
+# Seconds to wait for the cluster to become quorate after creating or joining.
+cluster_quorum_timeout: 120

@@ -1,6 +1,47 @@
 ---
-- name: Setup Cluster
+# Runs from a checkout (`ansible-playbook setup.yml`) and from the installed
+# collection (`ansible-playbook pfurtschellerp.proxspray.setup`).
+
+- name: Check Ansible version
+  ansible.builtin.import_playbook: ansible_version.yml
+
+- name: Gather facts
+  ansible.builtin.import_playbook: facts.yml
+
+- name: Configure Proxmox VE nodes
   hosts: all
+  gather_facts: false
   become: true
   roles:
-    - { role: thunderbolt }
+    - role: proxmox
+      tags: proxmox
+
+# A failure on any node stops the cluster setup on all of them.
+- name: Create Proxmox VE cluster
+  hosts: all
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  roles:
+    - role: cluster
+      tags: cluster
+
+# The fabric is cluster-wide SDN configuration, so it follows the cluster.
+# Both roles share a play, so the fabric picks up thunderbolt_devices.
+- name: Configure Thunderbolt mesh
+  hosts: all
+  gather_facts: false
+  become: true
+  roles:
+    - role: thunderbolt
+      tags: thunderbolt
+    - role: fabric
+      tags: fabric
+
+- name: Configure certificates
+  hosts: all
+  gather_facts: false
+  become: true
+  roles:
+    - role: certificates
+      tags: certificates

@@ -1,0 +1,41 @@
+---
+- name: Assert that the init node is part of the play
+  ansible.builtin.assert:
+    that: cluster_init_node in ansible_play_hosts
+    fail_msg: >-
+      The cluster does not exist yet and the init node {{ cluster_init_node }} is not part of this run
+      (excluded by --limit or failed). Include it or set cluster_init_node to another node.
+    quiet: true
+  run_once: true
+  when: cluster_init_name == ''
+
+- name: Create cluster {{ cluster_name }}
+  ansible.builtin.command:
+    argv: "{{ ['pvecm', 'create', cluster_name] + cluster_link_args }}"
+  register: cluster_create
+  changed_when: true
+  when:
+    - inventory_hostname == cluster_init_node
+    - cluster_init_name == ''
+
+- name: Wait for the new cluster to become quorate
+  ansible.builtin.command: pvesh get /cluster/status --output-format json
+  register: cluster_create_status
+  changed_when: false
+  until: >-
+    cluster_create_status.rc == 0
+    and (cluster_create_status.stdout | from_json | selectattr('type', 'eq', 'cluster')
+         | map(attribute='quorate') | first | default(0)) == 1
+  retries: "{{ (cluster_quorum_timeout | int / 5) | round(0, 'ceil') | int }}"
+  delay: 5
+  when: cluster_create is not skipped
+
+- name: Remember that the init node now hosts the cluster
+  ansible.builtin.set_fact:
+    cluster_init_name: "{{ cluster_name }}"
+    cluster_init_members: >-
+      {{ hostvars[cluster_init_node].cluster_create_status.stdout | from_json
+         | selectattr('type', 'eq', 'node') | map(attribute='name') | list }}
+  when:
+    - cluster_init_name == ''
+    - not ansible_check_mode

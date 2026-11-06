@@ -1,0 +1,65 @@
+---
+# Nodes join with `pvecm add --use_ssh`, which logs into the init node as root
+# over SSH. That needs this node's root key authorised on the init node and the
+# init node's host key known here; no root password is required.
+- name: Join nodes that are not part of the cluster yet
+  when:
+    - cluster_current_name == ''
+    - inventory_hostname != cluster_init_node
+    - not ansible_check_mode
+  block:
+    - name: Assert that the cluster exists
+      ansible.builtin.assert:
+        that: cluster_init_name == cluster_name
+        fail_msg: "The init node {{ cluster_init_node }} does not host cluster '{{ cluster_name }}', cannot join."
+        quiet: true
+
+    # Proxmox VE creates this key on installation; only generated if missing.
+    - name: Ensure root has an SSH key
+      ansible.builtin.user:
+        name: root
+        generate_ssh_key: true
+        ssh_key_type: rsa
+        ssh_key_bits: 4096
+        ssh_key_file: .ssh/id_rsa
+      register: cluster_root_ssh_key
+
+    # /root/.ssh/authorized_keys is a symlink into the cluster filesystem
+    # (/etc/pve/priv), which does not support chmod, so append to it directly.
+    - name: Authorize the root SSH keys on the init node
+      ansible.builtin.shell: |
+        set -eu
+        file=$(readlink -f /root/.ssh/authorized_keys)
+        while IFS= read -r key; do
+          [ -n "$key" ] || continue
+          if ! grep -qxF "$key" "$file" 2>/dev/null; then
+            printf '%s\n' "$key" >> "$file"
+            echo added
+          fi
+        done
+      args:
+        stdin: "{{ cluster_root_ssh_key.ssh_public_key }}"
+      register: cluster_authorize
+      changed_when: "'added' in cluster_authorize.stdout"
+      delegate_to: "{{ cluster_init_node }}"
+      throttle: 1
+
+    - name: Read the SSH host key of the init node
+      ansible.builtin.slurp:
+        src: /etc/ssh/ssh_host_ed25519_key.pub
+      register: cluster_init_hostkey
+      delegate_to: "{{ cluster_init_node }}"
+
+    - name: Trust the SSH host key of the init node
+      ansible.builtin.known_hosts:
+        path: /root/.ssh/known_hosts
+        name: "{{ cluster_join_address | trim }}"
+        key: "{{ cluster_join_address | trim }} {{ (cluster_init_hostkey.content | b64decode).split()[:2] | join(' ') }}"
+        state: present
+
+    # Nodes must join one after another.
+    - name: Join cluster {{ cluster_name }}
+      ansible.builtin.command:
+        argv: "{{ ['pvecm', 'add', cluster_join_address | trim, '--use_ssh', '1'] + cluster_link_args }}"
+      changed_when: true
+      throttle: 1

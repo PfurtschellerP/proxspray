@@ -1,0 +1,5 @@
+---
+# ['--link0', '<address>', '--link1', '<address>', ...]
+cluster_link_args: >-
+  {{ range(cluster_links | length) | map('regex_replace', '^', '--link')
+     | zip(cluster_links | map('trim')) | flatten }}

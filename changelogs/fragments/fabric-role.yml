@@ -1,0 +1,3 @@
+---
+major_changes:
+  - fabric - new role that builds a routed full mesh over the Thunderbolt links with a Proxmox VE SDN OpenFabric fabric (one /32 router ID per node, rerouting over the third node when a cable fails). It verifies routes and full-MTU reachability of all nodes, adds the fabric as corosync link 1 while link 0 on the management network stays preferred, and uses the fabric for live migration.

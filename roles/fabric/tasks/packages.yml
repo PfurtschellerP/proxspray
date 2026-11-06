@@ -1,0 +1,15 @@
+---
+# frr-pythontools provides frr-reload.py, which Proxmox VE uses to apply the
+# generated FRR configuration.
+- name: Install FRR
+  ansible.builtin.apt:
+    name:
+      - frr
+      - frr-pythontools
+    state: present
+
+- name: Enable and start FRR
+  ansible.builtin.systemd_service:
+    name: frr
+    enabled: true
+    state: started

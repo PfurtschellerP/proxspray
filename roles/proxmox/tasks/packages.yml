@@ -1,0 +1,12 @@
+---
+# Proxmox VE must never be upgraded with a plain `apt upgrade`.
+- name: Upgrade all packages
+  ansible.builtin.apt:
+    upgrade: full
+  when: proxmox_apt_upgrade | bool
+  notify: Report pending reboot
+
+- name: Install packages
+  ansible.builtin.apt:
+    name: "{{ ['chrony'] + proxmox_packages }}"
+    state: present

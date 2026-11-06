@@ -1,0 +1,23 @@
+---
+# A Thunderbolt netdev only exists while the cable is connected and the peer
+# is up, so it is created after networking.service at boot and recreated on
+# every replug. udev asks systemd to run `ifup` for it whenever it appears.
+- name: Install systemd unit that brings up Thunderbolt interfaces
+  ansible.builtin.template:
+    src: proxspray-thunderbolt-ifup@.service.j2
+    dest: /etc/systemd/system/proxspray-thunderbolt-ifup@.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload systemd
+
+- name: Install udev rules for Thunderbolt interface hotplug
+  ansible.builtin.template:
+    src: thunderbolt.rules.j2
+    dest: /etc/udev/rules.d/90-proxspray-thunderbolt.rules
+    owner: root
+    group: root
+    mode: "0644"
+  notify:
+    - Reload udev rules

@@ -1,0 +1,34 @@
+---
+- name: Validate certificate configuration
+  ansible.builtin.assert:
+    that:
+      - certificates_mode in ['self_signed', 'acme']
+      - certificates_min_validity_days | int > 0
+    fail_msg: "certificates_mode must be self_signed or acme, got '{{ certificates_mode }}'."
+    quiet: true
+
+- name: Get certificate information
+  ansible.builtin.command: pvesh get /nodes/{{ certificates_node }}/certificates/info --output-format json
+  register: certificates_info
+  changed_when: false
+  check_mode: false
+
+- name: Get node configuration
+  ansible.builtin.command: pvesh get /nodes/{{ certificates_node }}/config --output-format json
+  register: certificates_node_config
+  changed_when: false
+  check_mode: false
+
+- name: Set current certificate state
+  ansible.builtin.set_fact:
+    certificates_san: "{{ certificates_info.stdout | from_json | items2dict(key_name='filename', value_name='san') }}"
+    certificates_notafter: "{{ certificates_info.stdout | from_json | items2dict(key_name='filename', value_name='notafter') }}"
+    certificates_config: "{{ certificates_node_config.stdout | from_json }}"
+
+- name: Use certificates of the cluster CA
+  ansible.builtin.include_tasks: self_signed.yml
+  when: certificates_mode == 'self_signed'
+
+- name: Use ACME certificates
+  ansible.builtin.include_tasks: acme.yml
+  when: certificates_mode == 'acme'

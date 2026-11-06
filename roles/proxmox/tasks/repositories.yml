@@ -1,0 +1,64 @@
+---
+- name: Configure Proxmox VE repository
+  ansible.builtin.template:
+    src: proxmox.sources.j2
+    dest: /etc/apt/sources.list.d/proxmox.sources
+    owner: root
+    group: root
+    mode: "0644"
+  register: proxmox_repo_pve
+
+- name: Configure Ceph repository
+  ansible.builtin.template:
+    src: ceph.sources.j2
+    dest: /etc/apt/sources.list.d/ceph.sources
+    owner: root
+    group: root
+    mode: "0644"
+  register: proxmox_repo_ceph
+  when: proxmox_ceph_repository != 'none'
+
+- name: Remove Ceph repository
+  ansible.builtin.file:
+    path: /etc/apt/sources.list.d/ceph.sources
+    state: absent
+  register: proxmox_repo_ceph_removed
+  when: proxmox_ceph_repository == 'none'
+
+# Created by the installer, superseded by proxmox.sources.
+- name: Remove installer and legacy repository files
+  ansible.builtin.file:
+    path: "{{ proxmox_apt_file }}"
+    state: absent
+  loop: "{{ ['/etc/apt/sources.list.d/pve-enterprise.sources'] + proxmox_legacy_apt_files }}"
+  loop_control:
+    loop_var: proxmox_apt_file
+  register: proxmox_repo_removed
+
+- name: Check subscription status
+  ansible.builtin.command: pvesubscription get
+  register: proxmox_subscription
+  changed_when: false
+  check_mode: false
+  when: proxmox_subscription_key | length > 0
+
+- name: Set subscription key
+  ansible.builtin.command:
+    argv: [pvesubscription, set, "{{ proxmox_subscription_key }}"]
+  register: proxmox_subscription_set
+  changed_when: true
+  no_log: true
+  when:
+    - proxmox_subscription_key | length > 0
+    - >-
+      ('key: ' ~ proxmox_subscription_key) not in proxmox_subscription.stdout
+      or 'status: active' not in proxmox_subscription.stdout | lower
+
+# Refreshing the cache is not a configuration change.
+- name: Update APT cache
+  changed_when: false
+  ansible.builtin.apt:
+    update_cache: true
+    cache_valid_time: >-
+      {{ 0 if (proxmox_repo_pve is changed or proxmox_repo_ceph is changed or proxmox_repo_ceph_removed is changed
+               or proxmox_repo_removed is changed or proxmox_subscription_set is changed) else 3600 }}

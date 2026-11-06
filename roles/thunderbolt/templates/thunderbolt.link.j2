@@ -1,8 +1,8 @@
 {{ ansible_managed | comment }}
 [Match]
-Path={{ interface.value.pci_path }}
+Path={{ thunderbolt_interface.value.pci_path }}
 Driver=thunderbolt-net
 
 [Link]
 MACAddressPolicy=none
-Name={{ interface.key }}
+Name={{ thunderbolt_interface.key }}

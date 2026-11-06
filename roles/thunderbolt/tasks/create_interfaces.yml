@@ -1,42 +1,50 @@
 ---
-# TODO: Updating initramfs required?
-- name: Install kernel modules
+# Loaded by systemd-modules-load from /etc/modules-load.d after the root
+# filesystem is mounted, so the initramfs does not need them.
+- name: Load Thunderbolt kernel modules now and on boot
   community.general.modprobe:
-    name: '{{ module_name }}'
+    name: "{{ thunderbolt_module }}"
     state: present
     persistent: present
   loop:
     - thunderbolt
     - thunderbolt-net
   loop_control:
-    loop_var: module_name
+    loop_var: thunderbolt_module
 
-- name: Enable systemd-networkd service
-  ansible.builtin.systemd:
-    name: systemd-networkd
-    enabled: true
-
+# .link files are applied by udev (net_setup_link), not by systemd-networkd.
 - name: Create systemd link files for consistent interface naming
   ansible.builtin.template:
-    src: 'thunderbolt.link.j2'
-    dest: '/etc/systemd/network/00-{{ interface.key }}.link'
-    mode: '0644'
-  loop: '{{ thunderbolt_devices | dict2items }}'
+    src: thunderbolt.link.j2
+    dest: "/etc/systemd/network/00-{{ thunderbolt_interface.key }}.link"
+    owner: root
+    group: root
+    mode: "0644"
+  loop: "{{ thunderbolt_devices | dict2items }}"
   loop_control:
-    loop_var: interface
+    loop_var: thunderbolt_interface
+    label: "{{ thunderbolt_interface.key }}"
   notify:
-    - Restart systemd-networkd
+    - Apply Thunderbolt link files
+    - Update initramfs
 
-# TODO: Reboot required at this point or is the systemd-networkd restart enough?
-# - name: Reboot, if required
-#   ansible.builtin.reboot:
-#     reboot_timeout: 300
+- name: Find Thunderbolt link files
+  ansible.builtin.find:
+    paths: /etc/systemd/network
+    patterns: "*.link"
+    contains: "^Driver=thunderbolt-net$"
+  register: thunderbolt_link_files
 
-- name: Verify Thunderbolt interfaces are present
-  ansible.builtin.command: ip link show {{ interface_name }}
-  changed_when: false
-  loop:
-    - en05
-    - en06
+# Stale files for renamed interfaces would match the same port and win or
+# conflict, depending on their sort order.
+- name: Remove link files of interfaces no longer in thunderbolt_devices
+  ansible.builtin.file:
+    path: "{{ thunderbolt_link_file }}"
+    state: absent
+  loop: >-
+    {{ thunderbolt_link_files.files | map(attribute='path')
+       | difference(thunderbolt_devices.keys() | map('regex_replace', '^(.*)$', '/etc/systemd/network/00-\1.link')) }}
   loop_control:
-    loop_var: interface_name
+    loop_var: thunderbolt_link_file
+  notify:
+    - Update initramfs

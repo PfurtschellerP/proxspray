@@ -1,0 +1,77 @@
+---
+- name: Wait for the fabric loopback address
+  ansible.builtin.command: ip -json address show dev {{ fabric_dummy_interface }}
+  register: fabric_dummy
+  changed_when: false
+  failed_when: false
+  until: >-
+    fabric_dummy.rc == 0
+    and fabric_self.ip in (fabric_dummy.stdout | from_json | first).addr_info | map(attribute='local') | list
+  retries: "{{ fabric_retries }}"
+  delay: 5
+
+- name: Assert that the fabric loopback address is configured
+  ansible.builtin.assert:
+    that: fabric_dummy.rc == 0 and fabric_self.ip in fabric_dummy.stdout
+    fail_msg: >-
+      {{ fabric_dummy_interface }} does not carry {{ fabric_self.ip }}. Check
+      /etc/network/interfaces.d/sdn and `pvesh get /cluster/sdn/fabrics/node/{{ fabric_name }}`.
+    quiet: true
+
+# A route over a Thunderbolt interface proves that OpenFabric learnt it; a
+# missing fabric would fall back to the default route.
+- name: Wait for routes to all other nodes over the fabric
+  ansible.builtin.command: ip -json route get {{ fabric_peer.ip }}
+  register: fabric_route
+  changed_when: false
+  failed_when: false
+  until: >-
+    fabric_route.rc == 0
+    and (fabric_route.stdout | from_json | first).dev | default('') in fabric_self.interfaces
+  retries: "{{ fabric_retries }}"
+  delay: 5
+  loop: "{{ fabric_peers }}"
+  loop_control:
+    loop_var: fabric_peer
+    label: "{{ fabric_peer.name }} ({{ fabric_peer.ip }})"
+
+- name: Assert that all other nodes are routed over the fabric
+  ansible.builtin.assert:
+    that:
+      - fabric_result.rc == 0
+      - (fabric_result.stdout | from_json | first).dev | default('') in fabric_self.interfaces
+    fail_msg: >-
+      No fabric route to {{ fabric_result.fabric_peer.name }} ({{ fabric_result.fabric_peer.ip }}), current route:
+      {{ fabric_result.stdout | default('none') }}. Check the neighbours with
+      `vtysh -c 'show openfabric neighbor'` and `vtysh -c 'show openfabric route'`.
+    quiet: true
+  loop: "{{ fabric_route.results }}"
+  loop_control:
+    loop_var: fabric_result
+    label: "{{ fabric_result.fabric_peer.name }}"
+
+- name: Ping all other nodes over the fabric
+  ansible.builtin.command: ping -c 3 -i 0.2 -W 2 {{ fabric_peer.ip }}
+  register: fabric_ping
+  changed_when: false
+  until: fabric_ping.rc == 0
+  retries: 3
+  delay: 2
+  loop: "{{ fabric_peers }}"
+  loop_control:
+    loop_var: fabric_peer
+    label: "{{ fabric_peer.name }} ({{ fabric_peer.ip }})"
+
+# 20 bytes IPv4 header + 8 bytes ICMP header
+- name: Ping all other nodes with full-size unfragmented packets
+  ansible.builtin.command: ping -c 3 -i 0.2 -W 2 -M do -s {{ fabric_mtu | int - 28 }} {{ fabric_peer.ip }}
+  register: fabric_ping_mtu
+  changed_when: false
+  until: fabric_ping_mtu.rc == 0
+  retries: 3
+  delay: 2
+  loop: "{{ fabric_peers }}"
+  loop_control:
+    loop_var: fabric_peer
+    label: "{{ fabric_peer.name }} ({{ fabric_peer.ip }})"
+  when: fabric_verify_mtu | bool

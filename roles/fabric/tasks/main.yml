@@ -1,0 +1,23 @@
+---
+- name: Validate fabric configuration
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Install FRR
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Configure the SDN fabric
+  ansible.builtin.import_tasks: sdn.yml
+
+- name: Verify the fabric
+  ansible.builtin.import_tasks: verify.yml
+  when:
+    - fabric_verify | bool
+    - not ansible_check_mode
+
+- name: Add the fabric as corosync link
+  ansible.builtin.import_tasks: corosync.yml
+  when: fabric_corosync_link | bool
+
+- name: Use the fabric for migration
+  ansible.builtin.import_tasks: migration.yml
+  when: fabric_migration_network | bool

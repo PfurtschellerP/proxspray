@@ -1,0 +1,25 @@
+---
+- name: Validate Thunderbolt device definitions
+  ansible.builtin.assert:
+    that:
+      - thunderbolt_devices is mapping
+      - thunderbolt_devices | length > 0
+      - thunderbolt_devices.keys() | select('match', '^[A-Za-z0-9_-]{1,15}$') | list | length == thunderbolt_devices | length
+      - thunderbolt_devices.values() | map(attribute='pci_path', default='') | select | list | length == thunderbolt_devices | length
+      - thunderbolt_mtu | int >= 68
+      - thunderbolt_mtu | int <= 65520
+    fail_msg: >-
+      thunderbolt_devices must map interface names (max. 15 characters, letters, digits, '-' and '_')
+      to a dict with a pci_path, and thunderbolt_mtu must be between 68 and 65520.
+    quiet: true
+
+- name: Check that ifupdown2 is available
+  ansible.builtin.stat:
+    path: /usr/sbin/ifreload
+  register: thunderbolt_ifreload
+
+- name: Assert that ifupdown2 is installed
+  ansible.builtin.assert:
+    that: thunderbolt_ifreload.stat.exists
+    fail_msg: ifupdown2 (/usr/sbin/ifreload) is required; this role targets Proxmox VE.
+    quiet: true

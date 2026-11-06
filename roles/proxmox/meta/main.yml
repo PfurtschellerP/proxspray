@@ -1,0 +1,15 @@
+---
+galaxy_info:
+  author: Patrick Pfurtscheller
+  description: Essential configuration of Proxmox VE nodes (repositories, packages, name resolution, time)
+  license: GPL-3.0-or-later
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+  galaxy_tags:
+    - proxmox
+    - virtualization
+
+dependencies: []

@@ -1,0 +1,2 @@
+{{ ansible_managed | comment('c') }}
+DPkg::Post-Invoke { "{{ proxmox_nag_script }} >/dev/null || true"; };

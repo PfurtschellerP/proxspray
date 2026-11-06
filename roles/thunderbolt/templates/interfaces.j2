@@ -1,0 +1,10 @@
+{{ ansible_managed | comment }}
+# Thunderbolt mesh links. Their addresses are managed by the Proxmox VE SDN
+# fabric (/etc/network/interfaces.d/sdn). Interfaces that appear later (boot,
+# cable replug) are brought up by proxspray-thunderbolt-ifup@<interface>.service.
+{% for interface in thunderbolt_devices | sort %}
+
+auto {{ interface }}
+iface {{ interface }} inet manual
+    mtu {{ thunderbolt_mtu }}
+{% endfor %}

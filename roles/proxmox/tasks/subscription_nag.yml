@@ -1,0 +1,48 @@
+---
+- name: Install the script that removes the subscription notice
+  ansible.builtin.template:
+    src: remove-subscription-nag.sh.j2
+    dest: "{{ proxmox_nag_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+  when: proxmox_remove_subscription_nag | bool
+
+# proxmoxlib.js is replaced on every proxmox-widget-toolkit update, so an APT
+# hook re-applies the patch after each dpkg run.
+- name: Install APT hook that removes the subscription notice
+  ansible.builtin.template:
+    src: no-subscription-nag.conf.j2
+    dest: /etc/apt/apt.conf.d/90proxspray-no-subscription-nag
+    owner: root
+    group: root
+    mode: "0644"
+  when: proxmox_remove_subscription_nag | bool
+
+- name: Remove the subscription notice now
+  ansible.builtin.command: "{{ proxmox_nag_script }}"
+  register: proxmox_nag_patch
+  changed_when: "'patched' in proxmox_nag_patch.stdout"
+  when:
+    - proxmox_remove_subscription_nag | bool
+    - not ansible_check_mode
+
+- name: Remove the subscription notice script and APT hook
+  ansible.builtin.file:
+    path: "{{ proxmox_nag_file }}"
+    state: absent
+  loop:
+    - /etc/apt/apt.conf.d/90proxspray-no-subscription-nag
+    - "{{ proxmox_nag_script }}"
+  loop_control:
+    loop_var: proxmox_nag_file
+  register: proxmox_nag_removed
+  when: not proxmox_remove_subscription_nag | bool
+
+# The apt module cannot reinstall packages.
+- name: Restore the original web interface library
+  ansible.builtin.command: apt-get install --reinstall -y proxmox-widget-toolkit # noqa: command-instead-of-module
+  changed_when: true
+  when:
+    - not proxmox_remove_subscription_nag | bool
+    - proxmox_nag_removed.results | selectattr('changed') | list | length > 0

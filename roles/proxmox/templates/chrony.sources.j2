@@ -1,0 +1,4 @@
+{{ ansible_managed | comment }}
+{% for server in proxmox_ntp_servers %}
+server {{ server }} iburst
+{% endfor %}

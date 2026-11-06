@@ -1,0 +1,22 @@
+---
+extends: default
+
+ignore: |
+  .ansible/
+  changelogs/
+
+rules:
+  # Compatible with ansible-lint
+  comments:
+    min-spaces-from-content: 1
+  comments-indentation: false
+  braces:
+    max-spaces-inside: 1
+  octal-values:
+    forbid-implicit-octal: true
+    forbid-explicit-octal: true
+  truthy:
+    allowed-values: ["true", "false"]
+    check-keys: false
+  line-length:
+    max: 160

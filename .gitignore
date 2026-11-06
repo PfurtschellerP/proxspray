@@ -1,2 +1,5 @@
 # Ansible
 .ansible
+
+# Files fetched from the nodes
+inventory/*/artifacts/

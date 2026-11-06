@@ -1,0 +1,18 @@
+---
+- name: Validate Proxmox VE node
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Configure name resolution
+  ansible.builtin.import_tasks: hosts.yml
+
+- name: Configure package repositories
+  ansible.builtin.import_tasks: repositories.yml
+
+- name: Install and upgrade packages
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Configure time and time synchronisation
+  ansible.builtin.import_tasks: time.yml
+
+- name: Configure subscription notice
+  ansible.builtin.import_tasks: subscription_nag.yml

@@ -1,0 +1,81 @@
+// Renovate configuration, see https://docs.renovatebot.com/configuration-options/
+// Runs through the Mend Renovate GitHub App. Open issue "Dependency Dashboard"
+// lists all pending and ignored updates.
+{
+  $schema: 'https://docs.renovatebot.com/renovate-schema.json',
+  extends: [
+    'config:recommended',
+    // Conventional commits, as in the rest of the repository (AGENTS.md).
+    ':semanticCommits',
+    // Pin GitHub Actions to commit SHAs (keeping the version as comment) and
+    // the Dev Container base image to a digest, so updates are explicit PRs.
+    'helpers:pinGitHubActionDigestsToSemver',
+    'docker:pinDigests',
+  ],
+
+  // One batch of PRs per week.
+  schedule: ['before 6am on monday'],
+
+  // Dependency updates need no changelog fragment (see the changelog job in
+  // .github/workflows/ci.yml).
+  labels: ['dependencies', 'skip-changelog'],
+
+  // Open PRs for known vulnerabilities right away, ignoring the schedule.
+  osvVulnerabilityAlerts: true,
+  vulnerabilityAlerts: {
+    labels: ['dependencies', 'skip-changelog', 'security'],
+  },
+
+  packageRules: [
+    {
+      description: 'GitHub Actions: one grouped PR',
+      matchManagers: ['github-actions'],
+      groupName: 'GitHub Actions',
+      semanticCommitType: 'ci',
+      semanticCommitScope: 'deps',
+      // Give new releases a few days to be yanked or fixed before adopting them.
+      minimumReleaseAge: '3 days',
+    },
+    {
+      description: 'Ansible tooling of the Dev Container and CI: raise the minimum versions of the >= ranges',
+      matchManagers: ['pip_requirements'],
+      matchFileNames: ['.devcontainer/requirements.txt'],
+      groupName: 'Python tooling',
+      rangeStrategy: 'bump',
+      minimumReleaseAge: '3 days',
+    },
+    {
+      description: 'Ansible collections of the Dev Container and CI: raise the minimum versions',
+      matchManagers: ['ansible-galaxy'],
+      matchFileNames: ['.devcontainer/requirements.yml'],
+      groupName: 'Ansible collections',
+      rangeStrategy: 'bump',
+    },
+    {
+      // The dependencies in galaxy.yml are the minimum versions the collection
+      // works with; raising them would only force users to upgrade. They are
+      // changed by hand when the code needs newer features.
+      description: 'Collection dependencies in galaxy.yml are maintained manually',
+      matchManagers: ['ansible-galaxy'],
+      matchFileNames: ['galaxy.yml'],
+      enabled: false,
+    },
+    {
+      description: 'Dev Container base image: digest updates in one PR',
+      matchDatasources: ['docker'],
+      matchPackageNames: ['mcr.microsoft.com/devcontainers/python'],
+      groupName: 'Dev Container base image',
+      semanticCommitType: 'chore',
+      semanticCommitScope: 'devcontainer',
+    },
+    {
+      // Stay on Debian trixie (same as Proxmox VE 9). A new Python minor
+      // version (3.15) is adopted by hand once Ansible supports it.
+      description: 'Dev Container base image: no Python minor or major upgrades',
+      matchDatasources: ['docker'],
+      matchPackageNames: ['mcr.microsoft.com/devcontainers/python'],
+      matchUpdateTypes: ['major', 'minor'],
+      enabled: false,
+    },
+  ],
+}

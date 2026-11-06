@@ -1,0 +1,106 @@
+---
+# The fabric lives in the cluster filesystem (/etc/pve/sdn), so it is
+# configured once. Changes are pending until applied, which regenerates the
+# network and FRR configuration on all nodes.
+
+- name: Get pending SDN fabrics
+  ansible.builtin.command: pvesh get /cluster/sdn/fabrics/fabric --pending 1 --output-format json
+  register: fabric_fabrics
+  changed_when: false
+  check_mode: false
+  run_once: true
+
+- name: Create or update fabric {{ fabric_name }}
+  vars:
+    fabric_current: "{{ fabric_fabrics.stdout | from_json | selectattr('id', 'eq', fabric_name) | first | default({}) }}"
+  ansible.builtin.command:
+    argv: >-
+      {{ (['pvesh', 'set', '/cluster/sdn/fabrics/fabric/' ~ fabric_name]
+          if fabric_current else
+          ['pvesh', 'create', '/cluster/sdn/fabrics/fabric', '--id', fabric_name])
+         + ['--protocol', 'openfabric', '--ip_prefix', fabric_ip_prefix,
+            '--hello_interval', fabric_hello_interval | string, '--csnp_interval', fabric_csnp_interval | string] }}
+  register: fabric_fabric_set
+  changed_when: true
+  run_once: true
+  when: >-
+    not fabric_current
+    or fabric_current.protocol | default('') != 'openfabric'
+    or fabric_current.ip_prefix | default('') != fabric_ip_prefix
+    or fabric_current.hello_interval | default(0) | int != fabric_hello_interval | int
+    or fabric_current.csnp_interval | default(0) | int != fabric_csnp_interval | int
+
+- name: Assert that the existing fabric is an OpenFabric fabric
+  ansible.builtin.assert:
+    that: >-
+      fabric_fabrics.stdout | from_json | selectattr('id', 'eq', fabric_name)
+      | map(attribute='protocol') | reject('eq', 'openfabric') | list | length == 0
+    fail_msg: Fabric '{{ fabric_name }}' exists with another protocol; remove it or choose another fabric_name.
+    quiet: true
+  run_once: true
+
+- name: Get pending nodes of fabric {{ fabric_name }}
+  ansible.builtin.command: pvesh get /cluster/sdn/fabrics/node/{{ fabric_name }} --pending 1 --output-format json
+  register: fabric_current_nodes
+  changed_when: false
+  check_mode: false
+  # In check mode a new fabric is not created, so there are no nodes yet.
+  failed_when: fabric_current_nodes.rc != 0 and not ansible_check_mode
+  run_once: true
+
+# Interface property strings are compared with their properties sorted.
+- name: Create or update fabric nodes
+  vars:
+    fabric_current: >-
+      {{ (fabric_current_nodes.stdout if fabric_current_nodes.rc == 0 else '[]') | from_json
+         | selectattr('node_id', 'eq', fabric_node.name) | first | default({}) }}
+    fabric_wanted_interfaces: >-
+      {{ fabric_node.interfaces | map('regex_replace', '^', 'name=') | map('regex_replace', '$', fabric_interface_suffix) | list }}
+    fabric_current_interfaces: "{{ fabric_current.interfaces | default([]) }}"
+  ansible.builtin.command:
+    argv: >-
+      {{ (['pvesh', 'set', '/cluster/sdn/fabrics/node/' ~ fabric_name ~ '/' ~ fabric_node.name]
+          if fabric_current else
+          ['pvesh', 'create', '/cluster/sdn/fabrics/node/' ~ fabric_name, '--node_id', fabric_node.name])
+         + ['--protocol', 'openfabric', '--ip', fabric_node.ip]
+         + (['--interfaces'] | product(fabric_wanted_interfaces) | flatten) }}
+  register: fabric_nodes_set
+  changed_when: true
+  run_once: true
+  loop: "{{ fabric_nodes }}"
+  loop_control:
+    loop_var: fabric_node
+    label: "{{ fabric_node.name }} ({{ fabric_node.ip }})"
+  when: >-
+    not fabric_current
+    or fabric_current.ip | default('') != fabric_node.ip
+    or fabric_current_interfaces | map('split', ',') | map('sort') | map('join', ',') | sort
+       != fabric_wanted_interfaces | map('split', ',') | map('sort') | map('join', ',') | sort
+
+# Also catches configuration left pending by an earlier, interrupted run.
+- name: Get pending and running fabric configuration
+  ansible.builtin.command: pvesh get /cluster/sdn/fabrics/all --{{ fabric_state }} 1 --output-format json
+  register: fabric_config_state
+  changed_when: false
+  check_mode: false
+  run_once: true
+  loop:
+    - pending
+    - running
+  loop_control:
+    loop_var: fabric_state
+
+- name: Apply the SDN configuration
+  vars:
+    fabric_pending: "{{ fabric_config_state.results[0].stdout | from_json }}"
+    fabric_running: "{{ fabric_config_state.results[1].stdout | from_json }}"
+  ansible.builtin.command: pvesh set /cluster/sdn
+  changed_when: true
+  run_once: true
+  when: >-
+    fabric_fabric_set is changed
+    or fabric_nodes_set is changed
+    or fabric_pending.fabrics | default([]) | map('dict2items') | map('rejectattr', 'key', 'in', ['digest', 'state']) | map('items2dict') | list
+       != fabric_running.fabrics | default([]) | map('dict2items') | map('rejectattr', 'key', 'in', ['digest', 'state']) | map('items2dict') | list
+    or fabric_pending.nodes | default([]) | map('dict2items') | map('rejectattr', 'key', 'in', ['digest', 'state']) | map('items2dict') | list
+       != fabric_running.nodes | default([]) | map('dict2items') | map('rejectattr', 'key', 'in', ['digest', 'state']) | map('items2dict') | list

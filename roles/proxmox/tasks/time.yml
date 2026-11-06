@@ -1,0 +1,44 @@
+---
+- name: Set timezone
+  community.general.timezone:
+    name: "{{ proxmox_timezone }}"
+  when: proxmox_timezone | length > 0
+
+- name: Configure NTP servers
+  ansible.builtin.template:
+    src: chrony.sources.j2
+    dest: /etc/chrony/sources.d/proxspray.sources
+    owner: root
+    group: root
+    mode: "0644"
+  when: proxmox_ntp_servers | length > 0
+  notify: Restart chrony
+
+- name: Disable the default NTP pool when NTP servers are configured
+  ansible.builtin.replace:
+    path: /etc/chrony/chrony.conf
+    regexp: '^(pool\s.*)$'
+    replace: '#\1 # disabled by proxspray'
+  when: proxmox_ntp_servers | length > 0
+  notify: Restart chrony
+
+- name: Remove NTP servers
+  ansible.builtin.file:
+    path: /etc/chrony/sources.d/proxspray.sources
+    state: absent
+  when: proxmox_ntp_servers | length == 0
+  notify: Restart chrony
+
+- name: Re-enable the default NTP pool when no NTP servers are configured
+  ansible.builtin.replace:
+    path: /etc/chrony/chrony.conf
+    regexp: '^#(pool\s.*) # disabled by proxspray$'
+    replace: '\1'
+  when: proxmox_ntp_servers | length == 0
+  notify: Restart chrony
+
+- name: Enable and start chrony
+  ansible.builtin.systemd_service:
+    name: chrony
+    enabled: true
+    state: started

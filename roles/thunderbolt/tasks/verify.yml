@@ -1,0 +1,38 @@
+---
+# Peer reachability is checked by the fabric role once the mesh is routed.
+- name: Wait for Thunderbolt interfaces to come up
+  ansible.builtin.command: ip -json -details link show dev {{ thunderbolt_interface }}
+  register: thunderbolt_link
+  changed_when: false
+  failed_when: false
+  until: >-
+    thunderbolt_link.rc == 0
+    and (thunderbolt_link.stdout | from_json | first).operstate == 'UP'
+    and (thunderbolt_link.stdout | from_json | first).mtu == thunderbolt_mtu | int
+  retries: "{{ (thunderbolt_verify_timeout | int / 5) | round(0, 'ceil') | int }}"
+  delay: 5
+  loop: "{{ thunderbolt_devices.keys() | sort }}"
+  loop_control:
+    loop_var: thunderbolt_interface
+
+- name: Assert that Thunderbolt interfaces are up
+  vars:
+    thunderbolt_state: "{{ (thunderbolt_result.stdout | from_json | first) if thunderbolt_result.rc == 0 else {} }}"
+  ansible.builtin.assert:
+    that:
+      - thunderbolt_result.rc == 0
+      - thunderbolt_state.parentbus | default('thunderbolt') == 'thunderbolt'
+      - thunderbolt_state.operstate == 'UP'
+      - thunderbolt_state.mtu == thunderbolt_mtu | int
+    fail_msg: >-
+      {{ thunderbolt_result.thunderbolt_interface }} is not up with mtu {{ thunderbolt_mtu }}.
+      {% if thunderbolt_result.rc != 0 %}The interface does not exist: check the cable, that the peer is up
+      and that pci_path matches (`udevadm info /sys/class/net/thunderbolt0 | grep ID_PATH`).
+      An existing interface is only renamed while it is down, so a reboot may be needed.
+      {% else %}Current state: {{ thunderbolt_state.operstate }}, mtu {{ thunderbolt_state.mtu }},
+      bus {{ thunderbolt_state.parentbus | default('unknown') }}.{% endif %}
+    quiet: true
+  loop: "{{ thunderbolt_link.results }}"
+  loop_control:
+    loop_var: thunderbolt_result
+    label: "{{ thunderbolt_result.thunderbolt_interface }}"
