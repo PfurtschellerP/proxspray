@@ -1,0 +1,108 @@
+---
+# --- Proxmox VE ISO -----------------------------------------------------------
+
+# Installer ISO and its checksum, from https://enterprise.proxmox.com/iso/
+# (SHA256SUMS). Changing it rebuilds the media of every node.
+install_media_iso_url: https://enterprise.proxmox.com/iso/proxmox-ve_9.2-1.iso
+install_media_iso_checksum: sha256:4e88fe416df9b527624a175f24c9aa07c714d3332afb1ee3dbf3879573ef2c6c
+
+# Download cache for the ISO on the controller.
+install_media_cache_dir: "{{ lookup('ansible.builtin.env', 'HOME') }}/.cache/proxspray"
+
+# Where the per-node ISOs (<host>.iso) and their inputs (<host>/) are written.
+# They contain the root password hash and the node's private SSH host keys.
+install_media_dest: "{{ inventory_dir }}/artifacts/install-media"
+
+# --- Node identity ----------------------------------------------------------
+
+# Fully qualified name of the node. Its first label becomes the hostname, which
+# is also the Proxmox VE node name.
+install_media_domain: ""
+install_media_fqdn: "{{ inventory_hostname }}.{{ install_media_domain }}"
+
+# Static management address, configured by the installer on the interface
+# selected by install_media_interface_filter. No DHCP is used.
+install_media_ip: "{{ node_ip | default(ansible_host) }}"
+install_media_prefix: 24
+install_media_gateway: ""
+# A single DNS server (the installer accepts only one; add more later).
+install_media_dns: ""
+
+# udev properties (globs allowed) that select the management interface; the
+# first interface matching any of them gets the address. On identical
+# hardware, set it once for all nodes by port name, e.g.
+#   {ID_NET_NAME_PATH: enp86s0}
+# (`udevadm info /sys/class/net/<interface>` on a node lists the properties).
+# Defaults to the MAC address in the host variable `node_mac`, if set.
+install_media_interface_filter: >-
+  {{ {'ID_NET_NAME_MAC': '*' ~ (node_mac | lower | regex_replace('[^0-9a-f]', ''))}
+     if node_mac is defined else {} }}
+
+# Pin network interface names to MAC addresses (Proxmox VE 9.1+), so kernel or
+# firmware updates cannot rename them. Without a mapping the installer names
+# them nic0, nic1, ...; a mapping sets custom names, e.g. {"58:47:ca:7a:00:01": "mgmt0"}.
+install_media_pin_interface_names: true
+install_media_interface_names: {}
+
+# --- Disk -------------------------------------------------------------------
+
+# Target disk(s), WIPED by the installer. Set exactly one of:
+#   install_media_disk_list:   kernel names, e.g. ["nvme0n1"]; fine with a single
+#                              disk, but names can swap with several NVMe drives
+#   install_media_disk_filter: udev properties with globs, e.g.
+#                              {ID_SERIAL: "Samsung_SSD_990_PRO_2TB_S7*"}; find
+#                              them with `proxmox-auto-install-assistant device-info -t disk`
+#                              or `udevadm info /dev/nvme0n1` on the node
+install_media_disk_list: []
+install_media_disk_filter: {}
+# any or all of the filter properties have to match.
+install_media_disk_filter_match: any
+
+# ext4, xfs, zfs or btrfs. Options go to the matching section of the answer
+# file: lvm.* for ext4/xfs (e.g. {hdsize: 200, maxvz: 0}), zfs.* (e.g.
+# {raid: raid0, arc-max: 4096}) or btrfs.*.
+install_media_filesystem: ext4
+install_media_filesystem_options: {}
+
+# On the first boot after the installation, wipe every other disk: all disks
+# except the new system disks and USB devices (the installer stick) lose
+# their partition tables and file system, LVM, Ceph and ZFS signatures. Old
+# signatures would otherwise keep them from being reused, e.g. by
+# `pveceph osd create`. The data is not securely erased. This runs on EVERY
+# installation from the media, the first one included.
+install_media_wipe_disks: false
+
+# --- System -----------------------------------------------------------------
+
+# Keyboard layout (e.g. de, en-us), two-letter country code and timezone.
+install_media_keyboard: en-us
+install_media_country: us
+install_media_timezone: "{{ proxmox_timezone | default('UTC', true) }}"
+install_media_mailto: "root@{{ install_media_fqdn }}"
+
+# Hash of the root password (web interface, console), e.g. from
+# `openssl passwd -6` or `mkpasswd -m yescrypt`. Keep it in Ansible Vault.
+install_media_root_password_hash: ""
+
+# Public keys for root, needed by Ansible after the installation
+# (`ssh-add -L` lists the keys of your agent).
+install_media_root_ssh_keys: []
+
+# Subscription key, applied by the installer on first boot.
+install_media_subscription_key: "{{ proxmox_subscription_key | default('') }}"
+
+# --- SSH host keys ----------------------------------------------------------
+
+# The nodes keep their SSH host keys across reinstalls, so neither Ansible nor
+# the other cluster nodes see a changed host key. The keys live here on the
+# controller and are written by a first-boot hook before sshd starts.
+install_media_host_keys_dir: "{{ inventory_dir }}/credentials/ssh_host_keys"
+# Take the keys of the running node if the controller has none yet, instead of
+# generating new ones. Unreachable nodes get new keys.
+install_media_host_keys_from_node: true
+# Add the host keys under the node's name, FQDN and IP to this known_hosts file
+# on the controller. Empty to skip.
+install_media_known_hosts: "{{ lookup('ansible.builtin.env', 'HOME') }}/.ssh/known_hosts"
+
+# Check the built ISOs with proxmox-auto-install-assistant inspect-iso.
+install_media_verify: true

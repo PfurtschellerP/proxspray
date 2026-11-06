@@ -1,0 +1,80 @@
+#!/bin/sh
+{{ ansible_managed | comment }}
+# First-boot hook of the Proxmox VE installer for {{ inventory_hostname }}.
+# Runs once before the network (and sshd) comes up and installs the node's
+# SSH host keys, so they stay the same across reinstalls.
+set -eu
+umask 077
+
+rm -f /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub
+{% for key in install_media_host_key_types %}
+
+cat > /etc/ssh/ssh_host_{{ key.type }}_key <<'EOF'
+{{ lookup('ansible.builtin.file', install_media_node_keys_dir ~ '/ssh_host_' ~ key.type ~ '_key') }}
+EOF
+cat > /etc/ssh/ssh_host_{{ key.type }}_key.pub <<'EOF'
+{{ lookup('ansible.builtin.file', install_media_node_keys_dir ~ '/ssh_host_' ~ key.type ~ '_key.pub') }}
+EOF
+{% endfor %}
+
+chown root:root /etc/ssh/ssh_host_*
+chmod 0600 /etc/ssh/ssh_host_*_key
+chmod 0644 /etc/ssh/ssh_host_*_key.pub
+{% if install_media_wipe_disks %}
+
+# Disks of the new system: below the root file system (LVM or btrfs members)
+# or in the ZFS root pool. Matched by what is in use, not by name, because an
+# old installation on another disk can carry the same names (VG pve, rpool).
+system_disks() {
+    root_uuid=$(findmnt --noheadings --output UUID / || true)
+    {
+        [ -z "$root_uuid" ] || blkid -c /dev/null -o device -t UUID="$root_uuid" || true
+        if command -v zpool >/dev/null; then
+            zpool list -v -H -P -L rpool 2>/dev/null | awk '$1 ~ "^/dev/" { print $1 }'
+        fi
+    } | while read -r dev; do
+        lsblk --inverse --noheadings --raw --paths --output NAME,TYPE "$dev" | awk '$2 == "disk" { print $1 }'
+    done | sort -u
+}
+
+wipe_disk() {
+    disk=$1
+    parts=$(lsblk --noheadings --raw --paths --output NAME,TYPE "$disk" | awk '$2 == "part" { print $1 }')
+    echo "proxspray: wiping $disk"
+    # Volume groups activated at boot (e.g. old Ceph OSDs) keep the disk busy.
+    # Selected by UUID, as an old VG may be named like the new one.
+    for dev in "$disk" $parts; do
+        vg_uuid=$(pvs --noheadings --options vg_uuid "$dev" 2>/dev/null | tr -d ' ' || true)
+        [ -z "$vg_uuid" ] || vgchange --activate n --select "vg_uuid=$vg_uuid" || true
+    done
+    for part in $parts; do
+        wipefs --all --force "$part" || true
+    done
+    wipefs --all --force "$disk"
+    blockdev --rereadpt "$disk" || true
+}
+
+wipe_other_disks() {
+    system=$(system_disks | tr '\n' ' ')
+    if [ -z "$system" ]; then
+        echo "proxspray: system disks not found, not wiping any disk" >&2
+        return 1
+    fi
+    echo "proxspray: system disks: $system"
+    # TRAN last: it is empty for some devices.
+    lsblk --nodeps --noheadings --raw --paths --output NAME,TYPE,RM,TRAN |
+        while read -r disk type removable transport; do
+            [ "$type" = disk ] || continue
+            [ "$removable" = 0 ] || continue
+            [ "$transport" != usb ] || continue
+            case $disk in /dev/zram* | /dev/loop*) continue ;; esac
+            case " $system " in *" $disk "*) continue ;; esac
+            wipe_disk "$disk"
+        done
+}
+
+wipe_other_disks || echo "proxspray: wiping the other disks failed" >&2
+{% endif %}
+
+# The installer keeps this hook on the system; it holds private keys.
+rm -f -- "$0"

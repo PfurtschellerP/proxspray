@@ -3,3 +3,6 @@
 
 # Files fetched from the nodes
 inventory/*/artifacts/
+
+# Generated secrets (SSH host keys of the nodes)
+inventory/*/credentials/

@@ -20,6 +20,7 @@ tags:
 dependencies:
   community.general: ">=13.0.0"
   ansible.posix: ">=2.0.0"
+  community.crypto: ">=2.0.0"
   community.proxmox: ">=2.0.0"
 
 repository: https://github.com/PfurtschellerP/proxspray
@@ -41,6 +42,7 @@ build_ignore:
   - changelogs/.plugin-cache.yaml
   - dist
   - inventory/*/artifacts
+  - inventory/*/credentials
 
 # A dict controlling use of manifest directives used in building the collection artifact. The key 'directives' is a
 # list of MANIFEST.in style

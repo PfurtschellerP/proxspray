@@ -1,0 +1,23 @@
+---
+install_media_iso_source: "{{ install_media_cache_dir }}/{{ install_media_iso_url | basename }}"
+install_media_iso: "{{ install_media_dest }}/{{ inventory_hostname }}.iso"
+install_media_workdir: "{{ install_media_dest }}/{{ inventory_hostname }}"
+install_media_answer: "{{ install_media_workdir }}/answer.toml"
+install_media_first_boot: "{{ install_media_workdir }}/first-boot.sh"
+install_media_build_stamp: "{{ install_media_workdir }}/build-id"
+install_media_node_keys_dir: "{{ install_media_host_keys_dir }}/{{ inventory_hostname }}"
+
+# Debian's default host key types and sizes.
+install_media_host_key_types:
+  - type: ed25519
+    size: 256
+  - type: ecdsa
+    size: 256
+  - type: rsa
+    size: 3072
+
+# Section of the answer file that takes install_media_filesystem_options.
+install_media_filesystem_section: >-
+  {{ {'ext4': 'lvm', 'xfs': 'lvm', 'zfs': 'zfs', 'btrfs': 'btrfs'}[install_media_filesystem] | default('lvm') }}
+
+install_media_ipv4_pattern: '^((25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])$'

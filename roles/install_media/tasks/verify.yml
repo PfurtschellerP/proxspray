@@ -1,0 +1,29 @@
+---
+- name: Inspect the ISO
+  ansible.builtin.command:
+    argv:
+      - proxmox-auto-install-assistant
+      - inspect-iso
+      - "{{ install_media_iso }}"
+  delegate_to: localhost
+  register: install_media_inspect
+  changed_when: false
+
+- name: Assert that the ISO installs this node unattended
+  ansible.builtin.assert:
+    that:
+      - install_media_inspect.stdout is search('Auto-install:\s+enabled')
+      - install_media_inspect.stdout is search('Fetch mode:\s+iso')
+      - install_media_inspect.stdout is search('fqdn = ' ~ (install_media_fqdn | to_json | regex_escape))
+    fail_msg: >-
+      {{ install_media_iso }} is not an unattended installer for {{ install_media_fqdn }}. Delete it and
+      {{ install_media_build_stamp }} and run the playbook again; `proxmox-auto-install-assistant inspect-iso`
+      shows what it contains.
+    quiet: true
+
+- name: Show how to write the media
+  ansible.builtin.debug:
+    msg: >-
+      {{ inventory_hostname }}: write {{ install_media_iso }} to a USB stick, e.g.
+      `sudo dd if={{ install_media_iso }} of=/dev/sdX bs=4M conv=fsync oflag=direct status=progress`,
+      and boot the node from it once. The reinstall playbook keeps a stick that stays plugged in up to date.
