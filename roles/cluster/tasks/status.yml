@@ -1,0 +1,44 @@
+---
+- name: Get cluster status of this node
+  ansible.builtin.command: pvesh get /cluster/status --output-format json
+  register: cluster_status
+  changed_when: false
+  check_mode: false
+
+- name: Get cluster status of the init node
+  ansible.builtin.command: pvesh get /cluster/status --output-format json
+  register: cluster_init_status
+  changed_when: false
+  check_mode: false
+  delegate_to: "{{ cluster_init_node }}"
+  run_once: true
+
+- name: Parse cluster status
+  vars:
+    cluster_self: "{{ cluster_status.stdout | from_json | selectattr('type', 'eq', 'cluster') | first | default({}) }}"
+    cluster_init: "{{ cluster_init_status.stdout | from_json | selectattr('type', 'eq', 'cluster') | first | default({}) }}"
+  ansible.builtin.set_fact:
+    cluster_current_name: "{{ cluster_self.name | default('') }}"
+    cluster_init_name: "{{ cluster_init.name | default('') }}"
+    cluster_init_members: >-
+      {{ cluster_init_status.stdout | from_json | selectattr('type', 'eq', 'node') | map(attribute='name') | list }}
+
+- name: Assert that the init node is not part of another cluster
+  ansible.builtin.assert:
+    that: cluster_init_name in ['', cluster_name]
+    fail_msg: >-
+      The init node {{ cluster_init_node }} is a member of cluster '{{ cluster_init_name }}', not
+      '{{ cluster_name }}'. A cluster cannot be renamed; set cluster_name accordingly.
+    quiet: true
+  run_once: true
+
+- name: Assert that this node is not part of another cluster
+  ansible.builtin.assert:
+    that:
+      - cluster_current_name in ['', cluster_name]
+      - cluster_current_name == '' or ansible_facts.hostname in cluster_init_members
+    fail_msg: >-
+      {{ inventory_hostname }} already is a member of cluster '{{ cluster_current_name }}' that does not
+      include {{ cluster_init_node }}. Remove it from that cluster first (it must be reinstalled or
+      separated as described in the Proxmox VE documentation).
+    quiet: true

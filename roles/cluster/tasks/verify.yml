@@ -1,0 +1,30 @@
+---
+- name: Wait for the cluster to be quorate
+  ansible.builtin.command: pvesh get /cluster/status --output-format json
+  register: cluster_final_status
+  changed_when: false
+  check_mode: false
+  until: >-
+    cluster_final_status.rc == 0
+    and (cluster_final_status.stdout | from_json | selectattr('type', 'eq', 'cluster')
+         | map(attribute='quorate') | first | default(0)) == 1
+  retries: "{{ (cluster_quorum_timeout | int / 5) | round(0, 'ceil') | int }}"
+  delay: 5
+  when: not ansible_check_mode
+
+- name: Assert that this node is an online member of the cluster
+  vars:
+    cluster_entries: "{{ cluster_final_status.stdout | from_json }}"
+    cluster_entry: "{{ cluster_entries | selectattr('type', 'eq', 'cluster') | first | default({}) }}"
+    cluster_self: "{{ cluster_entries | selectattr('type', 'eq', 'node') | selectattr('local', 'eq', 1) | first | default({}) }}"
+  ansible.builtin.assert:
+    that:
+      - cluster_entry.name | default('') == cluster_name
+      - cluster_self.online | default(0) == 1
+      - cluster_entry.nodes | default(0) | int >= groups['all'] | length
+    fail_msg: >-
+      {{ inventory_hostname }} is not healthy in cluster '{{ cluster_name }}':
+      cluster {{ cluster_entry.name | default('none') }}, {{ cluster_entry.nodes | default(0) }} of
+      {{ groups['all'] | length }} nodes, local node online: {{ cluster_self.online | default(0) == 1 }}.
+    quiet: true
+  when: not ansible_check_mode

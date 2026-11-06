@@ -1,0 +1,28 @@
+---
+- name: Validate cluster variables
+  ansible.builtin.assert:
+    that:
+      - cluster_name is string
+      - cluster_name is match('^[A-Za-z0-9][A-Za-z0-9-]{0,14}$')
+      - cluster_init_node in groups['all']
+      - cluster_join_address | trim | length > 0
+      - cluster_links is sequence and cluster_links is not string
+      - cluster_links | length >= 1
+      - cluster_links | length <= 8
+      - cluster_links | select('string') | map('trim') | select | list | length == cluster_links | length
+    fail_msg: >-
+      cluster_name must be 1-15 letters, digits or '-' (got '{{ cluster_name }}'), cluster_init_node an
+      inventory host (got '{{ cluster_init_node }}') and cluster_links a list of 1-8 addresses
+      (got {{ cluster_links }}).
+    quiet: true
+
+- name: Check that Proxmox VE is installed
+  ansible.builtin.stat:
+    path: /usr/bin/pvecm
+  register: cluster_pvecm
+
+- name: Assert that Proxmox VE is installed
+  ansible.builtin.assert:
+    that: cluster_pvecm.stat.exists
+    fail_msg: "{{ inventory_hostname }} does not run Proxmox VE (pvecm not found)."
+    quiet: true

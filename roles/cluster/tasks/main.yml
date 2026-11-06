@@ -1,0 +1,15 @@
+---
+- name: Validate cluster configuration
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Determine cluster state
+  ansible.builtin.import_tasks: status.yml
+
+- name: Create the cluster
+  ansible.builtin.import_tasks: create.yml
+
+- name: Join the cluster
+  ansible.builtin.import_tasks: join.yml
+
+- name: Verify the cluster
+  ansible.builtin.import_tasks: verify.yml

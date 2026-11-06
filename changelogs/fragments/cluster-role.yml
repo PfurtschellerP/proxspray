@@ -1,0 +1,3 @@
+---
+major_changes:
+  - cluster - new role that creates a Proxmox VE cluster on ``cluster_init_node`` and joins the other nodes one by one over SSH (no root password needed), with configurable corosync links, checks against joining a node of another cluster and a final quorum check.
