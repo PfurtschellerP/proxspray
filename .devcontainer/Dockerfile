@@ -13,3 +13,7 @@ RUN ansible-galaxy collection install \
         -r /tmp/devcontainer/requirements.yml \
         -p /usr/share/ansible/collections \
     && rm -rf /tmp/devcontainer
+
+# Custom shell prompt
+COPY prompt.sh /usr/local/share/proxspray/prompt.sh
+RUN echo 'source /usr/local/share/proxspray/prompt.sh' >> /home/vscode/.bashrc
