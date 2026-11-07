@@ -1,0 +1,33 @@
+---
+- name: Set the Ceph flags
+  ansible.builtin.command:
+    argv: [ceph, osd, set, "{{ power_flag }}"]
+  loop: "{{ power_state.ceph_flags }}"
+  loop_control:
+    loop_var: power_flag
+  changed_when: true
+  run_once: true
+  when: power_flag not in (power_osd_dump.stdout | default('{}', true) | from_json).flags | default('') | split(',')
+
+# Disarmed, HA releases all watchdogs, so nodes that lose quorum while the
+# others power off are not fenced, and with freeze it neither moves nor starts
+# guests (ha_shutdown_policy does not apply) until startup.yml re-arms it.
+- name: Disarm HA
+  ansible.builtin.command: ha-manager crm-command disarm-ha freeze
+  changed_when: true
+  run_once: true
+  when: power_ha.results[1].stdout | from_json | selectattr('type', 'eq', 'fencing')
+        | map(attribute='armed-state') | first | default('') not in ['disarmed', 'disarming']
+
+- name: Wait until HA is disarmed
+  ansible.builtin.command: pvesh get /cluster/ha/status/current --output-format json
+  register: power_ha_now
+  changed_when: false
+  until: >-
+    power_ha_now.rc == 0
+    and power_ha_now.stdout | from_json | selectattr('type', 'eq', 'fencing')
+        | map(attribute='armed-state') | first | default('') == 'disarmed'
+  retries: 30
+  delay: 5
+  run_once: true
+  when: not ansible_check_mode

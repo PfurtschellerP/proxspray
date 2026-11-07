@@ -1,0 +1,16 @@
+---
+# shutdown.yml: stop all guests, freeze Ceph and HA, power off all nodes.
+# startup.yml undoes it (tasks_from: startup.yml).
+
+- name: Validate and plan the shutdown
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Stop the guests
+  ansible.builtin.import_tasks: stop_guests.yml
+
+- name: Prepare Ceph and HA for the shutdown
+  ansible.builtin.import_tasks: prepare.yml
+
+- name: Power off the nodes
+  ansible.builtin.import_tasks: poweroff.yml
+  when: power_poweroff | bool

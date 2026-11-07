@@ -1,0 +1,18 @@
+---
+power_node: "{{ ansible_facts.hostname }}"
+power_hosts: "{{ groups['all'] | sort | join(',') }}"
+
+# What shutdown.yml changed, so that startup.yml can undo exactly that. In
+# /etc/pve, so every node has it after the cluster is back.
+power_state_file: /etc/pve/proxspray-shutdown.json
+
+# Keep Ceph from marking the OSDs out and moving data while the nodes come and
+# go. Client I/O is not paused (pause, nodown): no guest runs anyway, and
+# guests started at boot would hang on paused I/O.
+power_ceph_flags: [noout, norebalance, norecover, nobackfill]
+
+power_stop_retries: "{{ (power_stop_timeout | int / 10) | round(0, 'ceil') | int }}"
+power_health_retries: "{{ (power_health_timeout | int / 10) | round(0, 'ceil') | int }}"
+
+# PG states that mean a PG cannot serve I/O.
+power_inactive_states: [stale, down, incomplete, unknown, peering, inactive, activating]

@@ -1,0 +1,30 @@
+---
+- name: Wait until the guests run again
+  vars:
+    power_expected: "{{ power_state.guests | default([]) if power_restore_guests | bool else [] }}"
+  ansible.builtin.command: pvesh get /cluster/resources --type vm --output-format json
+  register: power_guests_now
+  changed_when: false
+  until: >-
+    power_guests_now.rc == 0
+    and power_guests_now.stdout | from_json | selectattr('vmid', 'in', power_expected | map(attribute='vmid') | list)
+        | rejectattr('status', 'eq', 'running') | list | length == 0
+  retries: "{{ power_health_retries }}"
+  delay: 10
+  failed_when: false
+  run_once: true
+
+- name: Assert that the guests run again
+  vars:
+    power_expected: "{{ power_state.guests | default([]) if power_restore_guests | bool else [] }}"
+    power_down: >-
+      {{ power_guests_now.stdout | from_json | selectattr('vmid', 'in', power_expected | map(attribute='vmid') | list)
+         | rejectattr('status', 'eq', 'running') | list }}
+  ansible.builtin.assert:
+    that: power_guests_now.rc == 0 and power_down | length == 0
+    fail_msg: >-
+      Guests that ran before the shutdown are not running after {{ power_health_timeout }} s:
+      {% for g in power_down %}{{ g.id }} {{ g.name | default('') }} on {{ g.node }}{{ ', ' if not loop.last }}{% endfor %}.
+      Check their task log and `ha-manager status`, start them, then run startup.yml again to finish.
+    quiet: true
+  run_once: true

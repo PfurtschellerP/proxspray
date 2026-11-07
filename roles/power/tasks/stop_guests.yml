@@ -1,0 +1,46 @@
+---
+# Proxmox VE's "stop all guests" of each node, in reverse start order and with
+# its timeout. Listing the VMIDs includes HA guests, which HA then stops; that
+# sets their HA state to stopped, which startup.yml sets back.
+- name: Stop the guests of this node
+  vars:
+    power_mine: >-
+      {{ power_guests.stdout | from_json | selectattr('status', 'eq', 'running') | selectattr('node', 'eq', power_node)
+         | map(attribute='vmid') | map('string') | list }}
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - create
+      - /nodes/{{ power_node }}/stopall
+      - --timeout
+      - "{{ power_guest_timeout | string }}"
+      - --vms
+      - "{{ power_mine | join(',') }}"
+  changed_when: true
+  when: power_mine | length > 0
+
+- name: Wait until all guests are stopped
+  ansible.builtin.command: pvesh get /cluster/resources --type vm --output-format json
+  register: power_guests_now
+  changed_when: false
+  until: >-
+    power_guests_now.rc == 0
+    and power_guests_now.stdout | from_json | selectattr('status', 'eq', 'running') | list | length == 0
+  retries: "{{ power_stop_retries }}"
+  delay: 10
+  failed_when: false
+  run_once: true
+  when: not ansible_check_mode
+
+- name: Assert that all guests are stopped
+  vars:
+    power_left: "{{ power_guests_now.stdout | from_json | selectattr('status', 'eq', 'running') | list }}"
+  ansible.builtin.assert:
+    that: power_guests_now.rc == 0 and power_left | length == 0
+    fail_msg: >-
+      Guests still run after {{ power_stop_timeout }} s:
+      {% for g in power_left %}{{ g.id }} {{ g.name | default('') }} on {{ g.node }}{{ ', ' if not loop.last }}{% endfor %}.
+      Shut them down (or stop them) in the web interface and run shutdown.yml again; it continues.
+    quiet: true
+  run_once: true
+  when: not ansible_check_mode

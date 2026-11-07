@@ -65,7 +65,7 @@ jobs:
       - name: Syntax check from the checkout
         run: |
           ansible-playbook -i inventory/sample/inventory.ini --syntax-check \
-            setup.yml install_media.yml reinstall.yml update.yml replace_osd.yml
+            setup.yml install_media.yml reinstall.yml update.yml replace_osd.yml shutdown.yml startup.yml
 
       - name: Build collection
         run: ansible-galaxy collection build --output-path dist
@@ -78,7 +78,7 @@ jobs:
           ANSIBLE_COLLECTIONS_PATH: ${{ runner.temp }}/collections:~/.ansible/collections
         run: |
           ansible-galaxy collection install "$GITHUB_WORKSPACE"/dist/*.tar.gz -p "$RUNNER_TEMP/collections"
-          for playbook in setup install_media reinstall update replace_osd; do
+          for playbook in setup install_media reinstall update replace_osd shutdown startup; do
             ansible-playbook -i "$GITHUB_WORKSPACE/inventory/sample/inventory.ini" \
               "pfurtschellerp.proxspray.$playbook" --syntax-check
           done

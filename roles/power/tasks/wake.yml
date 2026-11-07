@@ -1,0 +1,15 @@
+---
+# First play of startup.yml, before facts: the nodes may still be off.
+- name: Wake the node
+  community.general.wakeonlan:
+    mac: "{{ node_mac }}"
+  delegate_to: localhost
+  become: false
+  when:
+    - power_wake_on_lan | bool
+    - node_mac | default('') | length > 0
+
+- name: Wait until the node is reachable
+  ansible.builtin.wait_for_connection:
+    timeout: "{{ power_boot_timeout | int }}"
+    sleep: 5

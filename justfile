@@ -9,7 +9,7 @@ check:
     ansible-lint
     yamllint .
     antsibull-changelog lint
-    ansible-playbook -i inventory/sample/inventory.ini setup.yml install_media.yml reinstall.yml update.yml replace_osd.yml --syntax-check
+    ansible-playbook -i inventory/sample/inventory.ini setup.yml install_media.yml reinstall.yml update.yml replace_osd.yml shutdown.yml startup.yml --syntax-check
 
 # Create release/v<version> with the collected changelog and push it (summary: optional intro for the release notes)
 release-prepare version summary="":
