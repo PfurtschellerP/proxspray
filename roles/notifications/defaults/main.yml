@@ -1,0 +1,54 @@
+---
+# Proxmox VE notifications (Datacenter → Notifications) to a phone or chat:
+# failed backups, HA fencing, available updates, mails to root (e.g. from
+# smartd about failing disks) and the proxspray health check below.
+
+# Notification targets. Each needs a unique `name` (letters, digits, '-', '_')
+# and a `type`; keep tokens in Ansible Vault.
+#   telegram  Telegram bot: `token` (from @BotFather), `chat_id` (your user or
+#             group ID, e.g. from @userinfobot).
+#   ntfy      ntfy (app or self-hosted): `topic`, optional `server` (default
+#             https://ntfy.sh) and `token` (access token).
+#   gotify    Gotify server: `server` (URL), `token` (application token).
+#   signal    Signal through a self-hosted signal-cli-rest-api bridge
+#             (https://github.com/bbernhard/signal-cli-rest-api): `url` of the
+#             bridge, `number` (registered sender), `recipients` (list).
+#   webhook   Any other service (e.g. Discord, Slack, Home Assistant): `url`,
+#             optional `method` (post), `headers` (dict), `body` and `secrets`
+#             (dict). Body and headers are Proxmox VE (Handlebars) templates, so
+#             mark them !unsafe, e.g. body: !unsafe '{"text": "{{ escape title }}"}',
+#             and refer to secrets as {{ secrets.<name> }}.
+# Example:
+#   - name: phone
+#     type: telegram
+#     token: "{{ vault_telegram_token }}"
+#     chat_id: "123456789"
+# Targets created by proxspray that are no longer listed are removed.
+notifications_targets: []
+
+# Severities sent to the targets: info (e.g. successful backups, available
+# updates), notice, warning, error, unknown (mails to root, including the
+# health check). The built-in mail-to-root target is left as it is.
+notifications_severities: [notice, warning, error, unknown]
+
+# Name of the notification matcher that routes to the targets.
+notifications_matcher: proxspray
+
+# Send a test notification to targets that were created or changed.
+notifications_verify: true
+
+# --- Health check ---------------------------------------------------------------
+
+# Check quorum, offline nodes, Ceph health and the Thunderbolt links every
+# interval, and notify when a problem lasts longer than the grace period and
+# again when it is resolved. The grace period keeps reboots (e.g. update.yml)
+# from triggering notifications.
+notifications_healthcheck: true
+notifications_healthcheck_interval: 5min
+notifications_healthcheck_grace: 600
+# Ceph health checks not to report, e.g. [OSDMAP_FLAGS] to ignore noout.
+notifications_healthcheck_ceph_ignore: []
+# Thunderbolt interfaces and minimum speed in Gb/s (0: no speed check);
+# defaults to the thunderbolt role's settings from the inventory.
+notifications_healthcheck_thunderbolt_interfaces: "{{ (thunderbolt_devices | default({'en05': {}, 'en06': {}})).keys() | sort }}"
+notifications_healthcheck_min_link_speed: "{{ thunderbolt_min_link_speed | default(40) }}"

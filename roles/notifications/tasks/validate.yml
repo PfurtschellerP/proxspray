@@ -1,0 +1,49 @@
+---
+- name: Validate notification targets
+  vars:
+    notifications_required:
+      telegram: [token, chat_id]
+      ntfy: [topic]
+      gotify: [server, token]
+      signal: [url, number, recipients]
+      webhook: [url]
+    notifications_invalid: >-
+      {%- set invalid = [] -%}
+      {%- for t in notifications_targets -%}
+      {%-   if t is not mapping or t.name | default('') is not match('^[A-Za-z][A-Za-z0-9_-]*$')
+              or t.type | default('') not in notifications_types
+              or notifications_required[t.type] | reject('in', t.keys() | list) | list | length > 0
+              or (t.type == 'signal' and (t.recipients is string or t.recipients | length == 0)) -%}
+      {%-     set _ = invalid.append(t.name | default('(no name)') ~ ' (' ~ t.type | default('no type') ~ ')') -%}
+      {%-   endif -%}
+      {%- endfor -%}
+      {{ invalid }}
+  ansible.builtin.assert:
+    that:
+      - notifications_targets is sequence and notifications_targets is not string
+      - notifications_invalid | length == 0
+      - notifications_targets | map(attribute='name') | unique | list | length == notifications_targets | length
+      - notifications_severities | length > 0
+      - notifications_severities | reject('in', notifications_all_severities) | list | length == 0
+      - notifications_matcher is match('^[A-Za-z][A-Za-z0-9_-]*$')
+      - notifications_healthcheck_grace | int >= 0
+    fail_msg: >-
+      Invalid notification settings. Every target needs a unique name (a letter, then letters, digits, '-' or '_')
+      and a type of {{ notifications_types | join(', ') }} with its settings (telegram: token, chat_id; ntfy: topic;
+      gotify: server, token; signal: url, number, recipients; webhook: url), see roles/notifications/defaults/main.yml.
+      Invalid: {{ notifications_invalid | join(', ') or 'none' }}. notifications_severities must be a subset of
+      {{ notifications_all_severities | join(', ') }} (got {{ notifications_severities }}).
+    quiet: true
+  run_once: true
+
+- name: Check that the nodes form a cluster
+  ansible.builtin.stat:
+    path: /etc/pve/corosync.conf
+  register: notifications_corosync
+
+# The targets live in the cluster file system and are configured once.
+- name: Assert that the nodes form a cluster
+  ansible.builtin.assert:
+    that: notifications_corosync.stat.exists or groups['all'] | length == 1
+    fail_msg: Notification targets are cluster-wide configuration; create the cluster first (cluster role).
+    quiet: true

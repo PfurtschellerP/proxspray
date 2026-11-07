@@ -1,0 +1,8 @@
+{{ ansible_managed | comment }}
+# Orphan mode: when no NTP server is reachable, the nodes keep a common time
+# among themselves (the peers in sources.d/proxspray-peers.sources) instead of
+# drifting apart. All nodes use the same stratum.
+local stratum 10 orphan
+{% for ip in proxmox_peer_ips %}
+allow {{ ip }}
+{% endfor %}

@@ -1,0 +1,151 @@
+---
+- name: Validate role variables
+  ansible.builtin.assert:
+    that:
+      - replace_osd_list | length > 0
+      - replace_osd_cleanup | string | lower in ['auto', 'true', 'false']
+      - replace_osd_timeout | int > 0
+    fail_msg: >-
+      Set replace_osd_ids to the OSDs to remove, e.g. -e replace_osd_ids=3 (got '{{ replace_osd_ids }}'), and
+      replace_osd_cleanup to auto, true or false (got '{{ replace_osd_cleanup }}').
+    quiet: true
+  run_once: true
+
+- name: Check whether Ceph is configured
+  ansible.builtin.stat:
+    path: /etc/pve/ceph.conf
+  register: replace_osd_ceph_conf
+  run_once: true
+
+- name: Assert that Ceph is configured
+  ansible.builtin.assert:
+    that: replace_osd_ceph_conf.stat.exists
+    fail_msg: Ceph is not configured on this cluster (/etc/pve/ceph.conf is missing), there are no OSDs to replace.
+    quiet: true
+  run_once: true
+
+- name: Read the OSD tree
+  ansible.builtin.command: ceph osd tree --format json
+  register: replace_osd_tree
+  changed_when: false
+  check_mode: false
+  run_once: true
+
+# A dead disk's OSD keeps its metadata, so the plan can still name the disk.
+- name: Read the OSD metadata
+  ansible.builtin.command: ceph osd metadata --format json
+  register: replace_osd_metadata
+  changed_when: false
+  check_mode: false
+  run_once: true
+
+# Every host notes all requested OSDs that still exist, with their node and
+# disk; OSDs that are gone already (an earlier run) are skipped.
+- name: Note the OSDs to remove
+  vars:
+    replace_osd_nodes: "{{ (replace_osd_tree.stdout | from_json).nodes }}"
+    replace_osd_meta: "{{ replace_osd_metadata.stdout | from_json }}"
+  ansible.builtin.set_fact:
+    replace_osd_plan: >-
+      {%- set plan = [] -%}
+      {%- for id in replace_osd_list -%}
+      {%-   set osd = replace_osd_nodes | selectattr('type', 'eq', 'osd') | selectattr('id', 'eq', id) | first | default(none) -%}
+      {%-   if osd is not none -%}
+      {%-     set host = replace_osd_nodes | selectattr('type', 'eq', 'host')
+                         | selectattr('children', 'defined') | selectattr('children', 'contains', id)
+                         | map(attribute='name') | first | default('') -%}
+      {%-     set meta = replace_osd_meta | selectattr('id', 'eq', id) | first | default({}) -%}
+      {%-     set _ = plan.append({'id': id, 'name': 'osd.' ~ id, 'node': host,
+                                   'up': osd.status | default('') == 'up', 'in': osd.reweight | default(0) | float > 0,
+                                   'device': meta.devices | default('unknown'),
+                                   'device_ids': meta.device_ids | default('')}) -%}
+      {%-   endif -%}
+      {%- endfor -%}
+      {{ plan }}
+    replace_osd_node_hosts: >-
+      {{ dict(groups['all'] | map('extract', hostvars) | map(attribute='ansible_facts') | map(attribute='hostname')
+              | zip(groups['all'])) }}
+
+- name: Show the plan
+  ansible.builtin.debug:
+    msg: >-
+      {% for osd in replace_osd_plan %}{{ osd.name }} on {{ osd.node }} ({{ 'up' if osd.up else 'down' }},
+      {{ 'in' if osd.in else 'out' }}, disk {{ osd.device }}{{ ' ' ~ osd.device_ids if osd.device_ids }}){{ '; ' if not loop.last }}
+      {%- else %}The OSDs {{ replace_osd_confirm_expected }} do not exist (any more); nothing to remove.{% endfor %}
+  run_once: true
+
+- name: Assert that the removal is confirmed
+  ansible.builtin.assert:
+    that: replace_osd_confirm | string == replace_osd_confirm_expected
+    fail_msg: >-
+      This removes {{ replace_osd_confirm_expected }} from Ceph{{ ' and wipes running OSDs\' disks'
+      if replace_osd_cleanup | string | lower != 'false' }}. Check the plan above, then run again with
+      -e replace_osd_confirm={{ replace_osd_confirm_expected }}
+    quiet: true
+  run_once: true
+  when: replace_osd_plan | length > 0
+
+# pveceph destroys an OSD only on its own node.
+- name: Assert that the nodes of the OSDs are part of this run
+  vars:
+    replace_osd_missing: >-
+      {{ replace_osd_plan | rejectattr('node', 'in', replace_osd_node_hosts.keys() | list) | map(attribute='name') | list
+         + replace_osd_plan | selectattr('node', 'in', replace_osd_node_hosts.keys() | list)
+           | rejectattr('node', 'in', ansible_play_hosts | map('extract', hostvars) | map(attribute='ansible_facts')
+                                      | map(attribute='hostname') | list)
+           | map(attribute='name') | list }}
+  ansible.builtin.assert:
+    that: replace_osd_missing | length == 0
+    fail_msg: >-
+      {{ replace_osd_missing | join(', ') }}: the node is not an inventory host, excluded by --limit or unreachable.
+      The OSDs are removed on their own node; to replace a whole node, use reinstall.yml.
+    quiet: true
+  run_once: true
+
+- name: Read the Ceph status
+  ansible.builtin.command: ceph status --format json
+  register: replace_osd_status
+  changed_when: false
+  check_mode: false
+  run_once: true
+  when: replace_osd_plan | length > 0
+
+# A down OSD holds no data the cluster still serves from it, as long as every
+# PG is active from its other copies; otherwise the OSD may hold the last copy.
+- name: Assert that the down OSDs hold no data needed for I/O
+  vars:
+    replace_osd_states: "{{ (replace_osd_status.stdout | from_json).pgmap.pgs_by_state | default([]) }}"
+    replace_osd_inactive: >-
+      {{ replace_osd_states | rejectattr('state_name', 'search', '(^|\+)active(\+|$)') | list
+         + replace_osd_states | selectattr('state_name', 'search', '(^|\+)(' ~ replace_osd_inactive_states | join('|') ~ ')(\+|$)') | list }}
+  ansible.builtin.assert:
+    that: replace_osd_inactive | length == 0
+    fail_msg: >-
+      Not all placement groups are active: {{ replace_osd_inactive | map(attribute='state_name') | unique | join(', ') }}.
+      A down OSD may hold the last copy of their data, so it is not removed. Check `ceph health detail` and
+      `ceph pg dump_stuck`; try to bring the OSD back up (`systemctl start ceph-osd@<id>` on its node) first.
+    quiet: true
+  run_once: true
+  when: replace_osd_plan | rejectattr('up') | list | length > 0
+
+# Running OSDs: Ceph itself says whether stopping them keeps all data available.
+- name: Check that the running OSDs can be stopped
+  ansible.builtin.command:
+    argv: "{{ ['ceph', 'osd', 'ok-to-stop'] + replace_osd_plan | selectattr('up') | map(attribute='id') | map('string') | list }}"
+  register: replace_osd_ok_to_stop
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  run_once: true
+  when: replace_osd_plan | selectattr('up') | list | length > 0
+
+- name: Assert that the running OSDs can be stopped
+  ansible.builtin.assert:
+    that: replace_osd_ok_to_stop.rc == 0
+    fail_msg: >-
+      Stopping {{ replace_osd_plan | selectattr('up') | map(attribute='name') | join(', ') }} would make data
+      unavailable: {{ replace_osd_ok_to_stop.stderr | default('') | trim }} Wait until `ceph status` shows all
+      PGs active+clean (e.g. after another failure is fixed), or replace one OSD at a time.
+    quiet: true
+  run_once: true
+  when: replace_osd_ok_to_stop is not skipped

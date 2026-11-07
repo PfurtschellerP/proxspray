@@ -1,0 +1,15 @@
+---
+- name: Validate notification settings
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Configure notification targets
+  ansible.builtin.import_tasks: targets.yml
+
+- name: Install the health check
+  ansible.builtin.import_tasks: healthcheck.yml
+
+- name: Verify notifications
+  ansible.builtin.import_tasks: verify.yml
+  when:
+    - notifications_verify | bool
+    - not ansible_check_mode

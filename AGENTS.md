@@ -29,12 +29,13 @@ formatting. This file only lists what the linters don't check.
     (`ansible-playbook pfurtschellerp.proxspray.setup`) Ansible resolves them
     inside the collection. Both ways must keep working.
 - Play order in `playbooks/setup.yml`: Ansible version check → facts of all
-  nodes → `proxmox` → `cluster` → `thunderbolt` + `fabric` → `ceph` →
-  `certificates`.
+  nodes → `proxmox` → `cluster` → `thunderbolt` + `fabric` → `ceph` → `ha` →
+  `certificates` → `notifications`.
   Every role has a tag with its own name.
 - Other top-level playbooks follow the same pattern: `install_media.yml`
   (runs on the controller, every task `delegate_to: localhost`),
-  `reinstall.yml` (destructive, guarded by `reinstall_confirm`) and
+  `reinstall.yml` (destructive, guarded by `reinstall_confirm`),
+  `replace_osd.yml` (destructive, guarded by `replace_osd_confirm`) and
   `update.yml` (rolling update: a check play, the nodes with `serial: 1`, a
   finish play, all from one role via `tasks_from`).
 - Generated files go to `<inventory>/artifacts/`, generated secrets to
@@ -74,12 +75,15 @@ formatting. This file only lists what the linters don't check.
   `ansible.builtin.user` for SSH keys).
 - For Proxmox VE, use `community.proxmox` modules where they fit, **without**
   `api_host`: they then use the local API backend on the node (as root, no
-  credentials) and need `python3-proxmoxer` on the node. Fall back to `pvesh`,
+  credentials). They need proxmoxer >= 2.3, which Debian 13 does not ship, so
+  they run with `ansible_python_interpreter` set to the virtualenv
+  `/opt/proxspray/venv` that each such role installs. Fall back to `pvesh`,
   `pvecm` or `pvenode` with `ansible.builtin.command` when there is no module
   or the module needs credentials (e.g. `proxmox_cluster` joins with the root
   password; the cluster role joins over SSH instead). Current CLI uses: cluster
   status/create/join, SDN fabrics, cluster options, node certificate cleanup,
-  ACME terms of service. If there is no suitable module, propose to write one
+  ACME terms of service, notification targets and matchers, Ceph (`pveceph`,
+  `ceph`). If there is no suitable module, propose to write one
   that can be contributed to the community.
 - When the same logic is needed by Ansible and by the node itself (e.g. an
   APT hook), install it as a script and call that script from both.
@@ -146,7 +150,7 @@ ansible-lint                     # production profile
 yamllint .
 antsibull-changelog lint
 ansible-playbook -i inventory/sample/inventory.ini --syntax-check \
-  setup.yml install_media.yml reinstall.yml update.yml
+  setup.yml install_media.yml reinstall.yml update.yml replace_osd.yml
 ```
 
 `ansible-test sanity` needs the collection at

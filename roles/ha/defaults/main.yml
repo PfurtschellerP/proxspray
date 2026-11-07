@@ -1,0 +1,40 @@
+---
+# What HA does with its guests when a node is shut down or rebooted on purpose
+# (not when it fails):
+#   migrate:     live-migrate them to the other nodes first; needs free memory
+#                there, but the guests keep running
+#   conditional: Proxmox VE default: freeze on reboot, fail over on shutdown
+#   freeze:      leave them stopped on the node until it is back
+#   failover:    like freeze, but start them on another node if the node stays down
+# update.yml uses HA maintenance mode, which migrates them regardless.
+ha_shutdown_policy: migrate
+
+# Guests that HA keeps running: it restarts them when they fail and starts
+# them on another node when their node fails (after fencing, about 2 minutes).
+# All their disks must be on shared storage (Ceph). Each entry is a VMID or:
+#   - id: ct:101          # VMID, vm:<VMID> or ct:<VMID>
+#     state: started      # started | stopped | disabled | ignored
+#     max_restart: 1      # restarts on the same node before it is relocated
+#     max_relocate: 1     # relocations to other nodes before HA gives up
+# The guests have to exist: create them, then run `setup.yml --tags ha`.
+# HA resources created by proxspray that are no longer listed are removed
+# (the guests themselves stay).
+ha_resources: []
+
+# Where HA places its guests (Proxmox VE 9 HA rules, which replace HA groups):
+#   - name: db-on-node-1
+#     type: node-affinity       # prefer these nodes
+#     resources: [100]          # entries of ha_resources
+#     nodes: [node-1:2, node-2:1]   # node[:priority], higher priority first
+#     strict: false             # true: never run on other nodes, even if these fail
+#   - name: dns-apart
+#     type: resource-affinity
+#     resources: [101, 102]
+#     affinity: negative        # negative: on separate nodes; positive: together
+# Rules created by proxspray that are no longer listed are removed.
+ha_rules: []
+
+# Wait until the HA resources reach their state (skipped in check mode).
+ha_verify: true
+# Seconds to wait for that; starting a guest elsewhere can take a while.
+ha_timeout: 300

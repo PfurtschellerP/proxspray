@@ -43,13 +43,15 @@ ceph_media_pool_settings: >-
       'target_size_ratio': ceph_media_target_size_ratio | string}
      | combine({'allow_ec_optimizations': 'true'} if ceph_release_major[ceph_release] >= 20 else {}) }}
 
-# Used by verify.yml with the registered `ceph status` result.
+# Used by verify.yml with the registered `ceph status` result. Only the nodes
+# of this run know their OSD count (--limit), so the cluster must have at least
+# their OSDs, and all of its OSDs must be up and in.
 ceph_osds_expected: "{{ ansible_play_hosts_all | map('extract', hostvars, 'ceph_osd_count') | map('int') | sum }}"
 ceph_status: "{{ ceph_health.stdout | default('{}', true) | from_json }}"
 ceph_healthy: >-
   {{ ceph_health.rc | default(1) == 0
      and ceph_status.health.status | default('') == 'HEALTH_OK'
-     and ceph_status.osdmap.num_osds | default(0) | int == ceph_osds_expected | int
-     and ceph_status.osdmap.num_up_osds | default(0) | int == ceph_osds_expected | int
-     and ceph_status.osdmap.num_in_osds | default(0) | int == ceph_osds_expected | int
+     and ceph_status.osdmap.num_osds | default(0) | int >= ceph_osds_expected | int
+     and ceph_status.osdmap.num_up_osds | default(0) | int == ceph_status.osdmap.num_osds | default(-1) | int
+     and ceph_status.osdmap.num_in_osds | default(0) | int == ceph_status.osdmap.num_osds | default(-1) | int
      and ceph_status.pgmap.pgs_by_state | default([]) | rejectattr('state_name', 'eq', 'active+clean') | list | length == 0 }}

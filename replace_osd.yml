@@ -1,0 +1,3 @@
+---
+- name: Replace Ceph OSDs
+  ansible.builtin.import_playbook: playbooks/replace_osd.yml

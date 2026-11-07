@@ -1,3 +1,3 @@
 ---
 minor_changes:
-  - setup playbook - check the Ansible version, gather facts of all nodes (also with ``--limit``) and run the ``proxmox``, ``cluster``, ``thunderbolt``, ``fabric`` and ``certificates`` roles; every role has its own tag.
+  - setup playbook - check the Ansible version, gather facts of all nodes (also with ``--limit``) and run the ``proxmox``, ``cluster``, ``thunderbolt``, ``fabric``, ``ceph``, ``certificates`` and ``notifications`` roles; every role has its own tag.

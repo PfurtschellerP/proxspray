@@ -1,3 +1,25 @@
 ---
 proxmox_widget_toolkit_js: /usr/share/javascript/proxmox-widget-toolkit/proxmoxlib.js
 proxmox_nag_script: /usr/local/sbin/proxspray-remove-subscription-nag
+
+# community.proxmox needs proxmoxer >= 2.3, Debian 13 ships 2.2, so its
+# modules run with the Python of this virtualenv (system packages included).
+proxmox_venv: /opt/proxspray/venv
+proxmox_proxmoxer: proxmoxer==2.3.0
+
+# Microcode package for the detected CPU vendor; empty for other vendors.
+proxmox_microcode_package: >-
+  {{ 'intel-microcode' if 'GenuineIntel' in ansible_facts.processor | default([])
+     else 'amd64-microcode' if 'AuthenticAMD' in ansible_facts.processor | default([])
+     else '' }}
+proxmox_firmware_sources: /etc/apt/sources.list.d/proxspray-non-free-firmware.sources
+
+# Management addresses of the other nodes (chrony peers); role defaults of
+# other hosts are not in hostvars, so this follows proxmox_node_ip's default.
+proxmox_peer_ips: >-
+  {%- set ips = [] -%}
+  {%- for host in groups['all'] | reject('eq', inventory_hostname) | sort -%}
+  {%-   set _ = ips.append(hostvars[host].proxmox_node_ip | default(hostvars[host].node_ip)
+                           | default(hostvars[host].ansible_facts.default_ipv4.address)) -%}
+  {%- endfor -%}
+  {{ ips }}

@@ -5,7 +5,7 @@
 ## Installation media (roles/install_media, install_media.yml)
 # install_media_domain: lab.example          # FQDN: <inventory name>.<domain>
 # install_media_gateway: 10.10.1.1
-# install_media_dns: 10.10.1.1
+# install_media_dns: [10.10.1.1, 9.9.9.9]       # up to 3, tried in order; the installer gets the first
 # install_media_prefix: 24
 # install_media_interface_filter:            # management port, or node_mac per host
 #   ID_NET_NAME_PATH: enp86s0
@@ -34,6 +34,9 @@
 # proxmox_apt_upgrade: false
 # proxmox_timezone: Europe/Berlin
 # proxmox_ntp_servers: []
+# proxmox_ntp_peers: true                   # nodes also sync with each other
+# proxmox_cpu_microcode: true               # intel-microcode / amd64-microcode for the detected CPU
+# proxmox_dns_servers: [10.10.1.1, 9.9.9.9] # defaults to install_media_dns
 # proxmox_packages: []
 # proxmox_remove_subscription_nag: false
 
@@ -44,10 +47,12 @@
 #   en06:
 #     pci_path: "pci-0000:00:0d.3"
 # thunderbolt_mtu: 65520
+# thunderbolt_min_link_speed: 40            # Gb/s per direction; 0 disables the check
 
 ## Routed mesh over Thunderbolt (roles/fabric)
 # fabric_name: tbmesh
 # fabric_ip_prefix: 10.100.0.0/24            # node router IDs: 10.100.0.<node_id>
+# fabric_hello_multiplier: 3                 # failed link detected after 3 x 1 s
 # fabric_corosync_link: true                 # corosync link 1, management stays link 0 (preferred)
 # fabric_migration_network: true
 # fabric_migration_type: secure              # insecure: faster, unencrypted
@@ -65,6 +70,18 @@
 # ceph_media_target_size_ratio: 0.7
 # ceph_media_min_size: 2                     # 2: media stays available with a node down; 3: Ceph's safer default
 
+## High availability (roles/ha); run `setup.yml --tags ha` after creating the guests
+# ha_shutdown_policy: migrate         # migrate | conditional | freeze | failover
+# ha_resources:                       # guests on Ceph that HA keeps running
+#   - 100
+#   - id: ct:101
+#     state: started
+# ha_rules:
+#   - name: dns-apart
+#     type: resource-affinity         # or node-affinity with nodes: [node-1:2, node-2:1]
+#     resources: [101, 102]
+#     affinity: negative
+
 ## Certificates (roles/certificates)
 # certificates_mode: self_signed             # self_signed | acme
 # certificates_fetch_ca: false               # copy pve-root-ca.pem to <inventory>/artifacts/
@@ -80,3 +97,12 @@
 # certificates_acme_domains:                 # defaults to the node's FQDN
 #   - domain: "{{ inventory_hostname }}.example.com"
 #     plugin: cloudflare
+
+## Notifications (roles/notifications)
+# notifications_targets:
+#   - name: phone
+#     type: telegram                           # telegram | ntfy | gotify | signal | webhook
+#     token: "{{ vault_telegram_token }}"
+#     chat_id: "123456789"
+# notifications_severities: [notice, warning, error, unknown]
+# notifications_healthcheck: true            # quorum, Ceph and Thunderbolt checks every 5 minutes

@@ -1,0 +1,16 @@
+---
+# Proxmox VE writes /etc/resolv.conf from its node DNS settings (also shown
+# in the web interface), so they are set through its API.
+- name: Configure DNS servers
+  community.proxmox.proxmox_node:
+    node_name: "{{ ansible_facts.hostname }}"
+    # {search, dns1, dns2, ...}: unused dnsN are left out, which removes them.
+    dns: >-
+      {{ {'search': proxmox_dns_search}
+         | combine(dict(['dns1', 'dns2', 'dns3'] | zip(proxmox_dns_servers))) }}
+  vars:
+    ansible_python_interpreter: "{{ proxmox_venv }}/bin/python"
+  # In check mode on a new node, proxmoxer is not installed yet.
+  when:
+    - proxmox_dns_servers | length > 0
+    - not (ansible_check_mode and proxmox_proxmoxer_installed is changed)

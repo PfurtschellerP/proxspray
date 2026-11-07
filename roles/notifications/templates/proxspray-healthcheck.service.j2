@@ -1,0 +1,8 @@
+{{ ansible_managed | comment }}
+[Unit]
+Description=proxspray health check (quorum, Ceph, Thunderbolt links)
+After=pve-cluster.service
+
+[Service]
+Type=oneshot
+ExecStart={{ notifications_script }}

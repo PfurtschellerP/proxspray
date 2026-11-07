@@ -41,17 +41,29 @@ An Ansible collection (`pfurtschellerp.proxspray`) that turns three mini PCs int
 | :----: | ------- |
 | ✅ | Unattended installation: per-node installer ISOs generated from the inventory, reinstall from a plugged-in USB stick with a one-time UEFI boot |
 | ✅ | Rolling updates: health checks, guests moved away (HA maintenance mode, live and restart migration) and back, Ceph `noout`, reboot only when needed |
-| ✅ | Proxmox VE essentials: deb822 repositories (enterprise / no-subscription / test), packages, `/etc/hosts`, timezone, NTP |
-| ✅ | Thunderbolt links: `thunderbolt-net` modules, stable `en05`/`en06` naming via systemd `.link` files, MTU, hotplug and boot-time bringup |
+| ✅ | Proxmox VE essentials: deb822 repositories (enterprise / no-subscription / test), packages, CPU microcode, `/etc/hosts`, up to three DNS servers, timezone, NTP with the nodes as peers of each other |
+| ✅ | Thunderbolt links: `thunderbolt-net` modules, stable `en05`/`en06` naming via systemd `.link` files, MTU, hotplug and boot-time bringup, link speed check |
 | ✅ | Proxmox VE cluster creation and node join (over SSH, no root password needed) |
-| ✅ | Routed full mesh over Thunderbolt with a Proxmox VE SDN OpenFabric fabric, verified end to end (routes, full-MTU pings) |
+| ✅ | Routed full mesh over Thunderbolt with a Proxmox VE SDN OpenFabric fabric, verified end to end (routes, full-MTU pings), failover within 3 seconds |
 | ✅ | Mesh as redundant corosync link and as live migration network |
 | ✅ | Certificates from the cluster CA, optionally ACME (Let's Encrypt) with automatic renewal |
 | ✅ | Ceph (Tentacle) on the Thunderbolt mesh: RBD pool for VM disks, CephFS with an erasure-coded media directory |
+| ✅ | High availability: guests on Ceph are restarted on another node when theirs fails, placement rules, live migration instead of downtime on planned reboots |
+| ✅ | Failed disks: remove the OSD safely, swap the disk, recreate the OSD |
+| ✅ | Notifications to Telegram, ntfy, Gotify, Signal or webhooks, plus a health check for quorum, Ceph and the Thunderbolt links |
+
+## 🧭 Roadmap
+
+Planned, not implemented yet:
+
+- **Backups:** backup jobs to a target outside the cluster (Proxmox Backup Server or a NAS); CephFS inside the cluster is no backup.
+- **Access:** a personal admin user with two-factor authentication, API tokens for automation, optionally the Proxmox VE firewall (with the mesh, corosync and Ceph allowed).
+- **Integration tests:** run the playbooks against three nested Proxmox VE VMs (the mesh over virtual NICs instead of Thunderbolt).
+- **Major upgrades:** Proxmox VE and Ceph release upgrades (`pveXtoY` checks, Ceph's daemon order), once the next release comes out.
 
 ## 🚀 Quick start
 
-**Requirements:** Ansible ≥ 2.19, three Proxmox VE 9 nodes reachable over SSH as root, cabled in a Thunderbolt triangle.
+**Requirements:** Ansible ≥ 2.19, three Proxmox VE 9 nodes reachable over SSH as root, cabled in a Thunderbolt triangle. The nodes need internet access for APT and for PyPI: the `community.proxmox` modules need a newer proxmoxer than Debian 13 ships, so it is installed into `/opt/proxspray/venv` on each node.
 
 ```bash
 # 1. Install collection dependencies
@@ -93,13 +105,16 @@ The commonly changed settings are listed in [inventory/sample/group_vars/all/all
 | ---- | ------- | ------------- |
 | [install_media](roles/install_media/defaults/main.yml) | Unattended installer ISO per node (runs on the controller) | `install_media_domain`, `install_media_gateway`, `install_media_dns`, `install_media_disk_list`, `install_media_root_password_hash`, `install_media_root_ssh_keys` |
 | [reinstall](roles/reinstall/defaults/main.yml) | Reinstall nodes from their plugged-in stick | `reinstall_confirm`, `reinstall_update_media`, `reinstall_destroy_guests` |
-| [proxmox](roles/proxmox/defaults/main.yml) | Repositories, packages, `/etc/hosts`, time | `proxmox_repository`, `proxmox_ceph_release`, `proxmox_timezone`, `proxmox_ntp_servers`, `proxmox_apt_upgrade` |
+| [proxmox](roles/proxmox/defaults/main.yml) | Repositories, packages, microcode, `/etc/hosts`, DNS, time | `proxmox_repository`, `proxmox_ceph_release`, `proxmox_dns_servers`, `proxmox_cpu_microcode`, `proxmox_timezone`, `proxmox_ntp_servers`, `proxmox_ntp_peers`, `proxmox_apt_upgrade` |
 | [cluster](roles/cluster/defaults/main.yml) | Create and join the cluster | `cluster_name`, `cluster_init_node`, `cluster_links` |
-| [thunderbolt](roles/thunderbolt/defaults/main.yml) | Thunderbolt links | `thunderbolt_devices` (interface → port path), `thunderbolt_mtu` |
-| [fabric](roles/fabric/defaults/main.yml) | Routed mesh, corosync link, migration network | `fabric_ip_prefix`, `fabric_corosync_link`, `fabric_migration_network`, `fabric_migration_type` |
+| [thunderbolt](roles/thunderbolt/defaults/main.yml) | Thunderbolt links | `thunderbolt_devices` (interface → port path), `thunderbolt_mtu`, `thunderbolt_min_link_speed` |
+| [fabric](roles/fabric/defaults/main.yml) | Routed mesh, corosync link, migration network | `fabric_ip_prefix`, `fabric_hello_multiplier`, `fabric_corosync_link`, `fabric_migration_network`, `fabric_migration_type` |
 | [ceph](roles/ceph/defaults/main.yml) | Ceph monitors, managers, metadata servers, OSDs, pools, CephFS | `ceph_osd_devices`, `ceph_osd_model`, `ceph_media_*`, `ceph_osd_memory_target` |
+| [ha](roles/ha/defaults/main.yml) | HA resources, placement rules, shutdown policy | `ha_resources`, `ha_rules`, `ha_shutdown_policy` |
+| [replace_osd](roles/replace_osd/defaults/main.yml) | Remove failed OSDs so their disks can be swapped (`replace_osd.yml`) | `replace_osd_ids`, `replace_osd_confirm`, `replace_osd_cleanup` |
 | [update](roles/update/defaults/main.yml) | Rolling update of all nodes (`update.yml`) | `update_reboot`, `update_migrate`, `update_memory_reserve` |
 | [certificates](roles/certificates/defaults/main.yml) | Web interface / API certificates | `certificates_mode`, `certificates_acme_*` |
+| [notifications](roles/notifications/defaults/main.yml) | Notification targets and health check | `notifications_targets`, `notifications_severities`, `notifications_healthcheck` |
 
 ### 💿 Installing the nodes
 
@@ -147,6 +162,48 @@ The media directory survives one failed node like the replicated pools. With `ce
 
 On nodes with little memory, OSD memory (`ceph_osd_memory_target`, 3 GiB) and the metadata server cache (`ceph_mds_cache_memory_limit`, 1 GiB) are below Ceph's defaults of 4 GiB each.
 
+### 💽 Replacing a failed disk
+
+When a disk fails, Ceph marks its OSD down and keeps serving the data from the other two copies. Remove the OSD first, then swap the disk and let `setup.yml` create the new OSD:
+
+```bash
+ceph osd tree                                    # find the OSD, e.g. osd.4 on node-2 is down
+ansible-playbook -i inventory/mycluster/inventory.ini replace_osd.yml -e replace_osd_ids=4
+# → shows the OSD, its node and disk (model and serial), and the confirmation to pass:
+ansible-playbook -i inventory/mycluster/inventory.ini replace_osd.yml -e replace_osd_ids=4 -e replace_osd_confirm=osd.4
+
+# swap the disk, then:
+ansible-playbook -i inventory/mycluster/inventory.ini setup.yml --tags ceph
+```
+
+- **Safeguards:** a running OSD (a failing but still working disk) is only removed when `ceph osd ok-to-stop` agrees; a down one only while all placement groups are active, i.e. its data still has enough copies elsewhere. Otherwise the playbook stops before changing anything.
+- **What it does:** marks the OSD out, stops and disables its service and runs `pveceph osd destroy` on its node, which wipes a disk that still works (`replace_osd_cleanup`). Until the new OSD is in, the pools stay degraded: with one disk per node, Ceph has nowhere else to rebuild the copies.
+- **The new disk** must be empty; with `ceph_osd_devices` listing disks, put the new disk's path in the list first.
+
+### 🛟 High availability
+
+Proxmox VE's HA manager restarts a guest when it crashes and, when its node fails, starts it on another node once the failed node is fenced (about two minutes). List the guests in `ha_resources` after creating them and run `setup.yml --tags ha`:
+
+```yaml
+ha_resources:
+  - 100                     # VM or container 100, kept started
+  - id: ct:101
+    state: started          # started | stopped | disabled | ignored
+ha_rules:
+  - name: dns-apart         # keep the two DNS servers on different nodes
+    type: resource-affinity
+    resources: [101, 102]
+    affinity: negative
+  - name: db-on-node-1      # prefer node-1, then node-2
+    type: node-affinity
+    resources: [100]
+    nodes: [node-1:2, node-2:1]
+```
+
+The role checks that every HA guest exists and that all its disks, CD images and mount points are on shared storage (Ceph); a guest with a disk on `local-lvm` could not be started anywhere else. It then waits until the guests reach their state. HA resources and rules that proxspray created and you remove from the lists are removed from the cluster; the guests themselves stay. Those created in the web interface are left alone.
+
+`ha_shutdown_policy: migrate` (default) live-migrates HA guests to the other nodes when a node is rebooted or shut down on purpose, so a manual reboot does not stop them; Proxmox VE's default `conditional` freezes them on reboot instead. Leave enough free memory on the other two nodes for the guests of one node.
+
 ### 🔄 Updating the cluster
 
 ```bash
@@ -181,6 +238,25 @@ certificates_acme_plugins:
 
 Try it against the Let's Encrypt staging directory first (`certificates_acme_directory`). Without a plugin, the HTTP challenge is used, which needs port 80 of the nodes reachable from the internet.
 
+### 🔔 Notifications
+
+Proxmox VE notifies about failed backups, HA fencing, available updates and mails to root (e.g. smartd warning about a failing disk). The `notifications` role sends them to your phone instead of root's mailbox:
+
+```yaml
+notifications_targets:
+  - name: phone
+    type: telegram                 # telegram | ntfy | gotify | signal | webhook
+    token: "{{ vault_telegram_token }}"
+    chat_id: "123456789"
+  - name: ntfy
+    type: ntfy
+    topic: "{{ vault_ntfy_topic }}"   # server: https://ntfy.sh unless set
+```
+
+The targets are native Proxmox VE notification targets (Gotify, or webhooks with ready-made presets for Telegram, ntfy and Signal via [signal-cli-rest-api](https://github.com/bbernhard/signal-cli-rest-api)), visible under *Datacenter → Notifications*. A matcher sends them every notification of `notifications_severities` (by default all but `info`). New or changed targets get a test message.
+
+Proxmox VE does not watch everything that matters here, so every node also runs a health check every 5 minutes: lost quorum, offline nodes, Ceph health warnings, and Thunderbolt links that are down or slower than `thunderbolt_min_link_speed`. It reports a problem once it lasts longer than 10 minutes (`notifications_healthcheck_grace`, so reboots during updates stay quiet) and again when it is resolved, by mail to root, which Proxmox VE forwards to the targets. `/usr/local/sbin/proxspray-healthcheck --print` shows the current problems.
+
 ## 📁 Layout
 
 ```
@@ -189,6 +265,7 @@ Try it against the Let's Encrypt staging directory first (`certificates_acme_dir
 ├── install_media.yml      # Build the per-node installer ISOs
 ├── reinstall.yml          # Reinstall nodes from their plugged-in stick
 ├── update.yml             # Rolling update of all nodes
+├── replace_osd.yml        # Remove failed Ceph OSDs before a disk swap
 ├── playbooks/             # Playbooks, also available as pfurtschellerp.proxspray.<name>
 ├── roles/
 │   ├── install_media/     # Unattended installer ISOs (controller)
@@ -198,8 +275,11 @@ Try it against the Let's Encrypt staging directory first (`certificates_acme_dir
 │   ├── thunderbolt/       # Thunderbolt links
 │   ├── fabric/            # Routed mesh (SDN OpenFabric), corosync link, migration
 │   ├── ceph/              # Ceph: VM pool, CephFS, erasure-coded media directory
+│   ├── ha/                # High availability of guests
+│   ├── replace_osd/       # Safe removal of failed OSDs
 │   ├── update/            # Rolling update with migration and maintenance flags
-│   └── certificates/      # Cluster CA or ACME certificates
+│   ├── certificates/      # Cluster CA or ACME certificates
+│   └── notifications/     # Notification targets and health check
 ├── inventory/sample/      # Example inventory
 ├── changelogs/            # antsibull-changelog fragments and history
 └── .devcontainer/         # Ready-to-use dev environment

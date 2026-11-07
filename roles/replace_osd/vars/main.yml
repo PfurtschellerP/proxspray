@@ -1,0 +1,13 @@
+---
+replace_osd_node: "{{ ansible_facts.hostname }}"
+replace_osd_retries: "{{ (replace_osd_timeout | int / 10) | round(0, 'ceil') | int }}"
+
+# replace_osd_ids as a sorted list of numbers.
+replace_osd_list: >-
+  {{ ((replace_osd_ids | string).split(',') if replace_osd_ids is string or replace_osd_ids is number else replace_osd_ids)
+     | map('string') | map('trim') | select | map('int') | unique | sort }}
+replace_osd_confirm_expected: "{{ replace_osd_list | map('regex_replace', '^', 'osd.') | join(',') }}"
+
+# PG states in which a PG is not serving I/O. Only PGs that are all active can
+# lose an OSD that is already down without losing data.
+replace_osd_inactive_states: [stale, down, incomplete, unknown, peering, inactive, activating]

@@ -1,4 +1,8 @@
 ---
 certificates_node: "{{ ansible_facts.hostname }}"
+# Same virtualenv as the proxmox role (proxmox_venv): community.proxmox needs
+# proxmoxer >= 2.3, Debian 13 ships 2.2.
+certificates_venv: /opt/proxspray/venv
+certificates_proxmoxer: proxmoxer==2.3.0
 certificates_now: "{{ now(utc=true).timestamp() | int }}"
 certificates_min_notafter: "{{ certificates_now | int + certificates_min_validity_days | int * 86400 }}"

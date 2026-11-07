@@ -1,0 +1,3 @@
+---
+major_changes:
+  - notifications - new role that sends Proxmox VE notifications to Telegram, ntfy, Gotify, Signal (through a signal-cli-rest-api bridge) or any webhook, configured as native Proxmox VE notification targets with a matcher for the chosen severities. New or changed targets get a test notification. A health check timer on every node reports what Proxmox VE does not - lost quorum, offline nodes, Ceph health warnings and Thunderbolt links that are down or slower than expected - once a problem lasts longer than a grace period, and again when it is resolved.

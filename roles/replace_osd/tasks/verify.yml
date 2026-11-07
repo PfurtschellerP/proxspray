@@ -1,0 +1,46 @@
+---
+# Data of the removed OSDs is not re-replicated until a new OSD takes their
+# place (with one OSD per node there is nowhere else to put it), so the PGs
+# stay degraded, but they must be active.
+- name: Wait until the OSDs are gone and all placement groups are active
+  vars:
+    replace_osd_now: "{{ replace_osd_check.stdout | default('{}', true) | from_json }}"
+    replace_osd_states: "{{ replace_osd_now.pgmap.pgs_by_state | default([]) }}"
+  ansible.builtin.command: ceph status --format json
+  register: replace_osd_check
+  changed_when: false
+  until: >-
+    replace_osd_check.rc == 0
+    and replace_osd_states | rejectattr('state_name', 'search', '(^|\+)active(\+|$)') | list | length == 0
+    and replace_osd_states | selectattr('state_name', 'search', '(^|\+)(' ~ replace_osd_inactive_states | join('|') ~ ')(\+|$)')
+        | list | length == 0
+  retries: "{{ replace_osd_retries }}"
+  delay: 10
+  run_once: true
+  when: replace_osd_plan | length > 0
+
+- name: List the remaining OSDs
+  ansible.builtin.command: ceph osd ls --format json
+  register: replace_osd_remaining
+  changed_when: false
+  run_once: true
+
+- name: Assert that the OSDs are removed
+  vars:
+    replace_osd_left: "{{ replace_osd_list | select('in', replace_osd_remaining.stdout | from_json) | list }}"
+  ansible.builtin.assert:
+    that: replace_osd_left | length == 0
+    fail_msg: >-
+      OSD {{ replace_osd_left | join(', ') }} still exists; check `ceph osd tree` and the task log of
+      `pveceph osd destroy` on its node.
+    quiet: true
+  run_once: true
+
+- name: Show the next steps
+  ansible.builtin.debug:
+    msg: >-
+      {% for osd in replace_osd_plan %}Swap disk {{ osd.device_ids or osd.device }} of {{ osd.node }}.
+      {% endfor %}Then create the new OSDs with `ansible-playbook -i <inventory> setup.yml --tags ceph`;
+      with ceph_osd_devices listing disks, update the list first. Ceph rebuilds the missing copies on them.
+  run_once: true
+  when: replace_osd_plan | length > 0

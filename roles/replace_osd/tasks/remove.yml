@@ -1,0 +1,44 @@
+---
+- name: Note the OSDs of this node
+  ansible.builtin.set_fact:
+    replace_osd_mine: "{{ replace_osd_plan | selectattr('node', 'eq', replace_osd_node) | list }}"
+
+# Out first, so Ceph stops placing data on them.
+- name: Mark the OSDs out
+  ansible.builtin.command:
+    argv: [ceph, osd, out, "{{ replace_osd.id | string }}"]
+  loop: "{{ replace_osd_mine | selectattr('in') | list }}"
+  loop_control:
+    loop_var: replace_osd
+    label: "{{ replace_osd.name }}"
+  changed_when: true
+
+# Also keeps a failing disk's OSD from being restarted (the unit is disabled).
+- name: Stop the OSDs
+  ansible.builtin.systemd_service:
+    name: ceph-osd@{{ replace_osd.id }}
+    state: stopped
+    enabled: false
+  loop: "{{ replace_osd_mine }}"
+  loop_control:
+    loop_var: replace_osd
+    label: "{{ replace_osd.name }}"
+
+# Removes the OSD from the CRUSH map, its key and the OSD map; --cleanup also
+# wipes its disk (LVM volumes and partition table).
+- name: Destroy the OSDs
+  ansible.builtin.command:
+    argv:
+      - pveceph
+      - osd
+      - destroy
+      - "{{ replace_osd.id | string }}"
+      - --cleanup
+      - "{{ '1' if (replace_osd_cleanup | string | lower == 'true'
+                    or (replace_osd_cleanup | string | lower == 'auto' and replace_osd.up)) else '0' }}"
+  loop: "{{ replace_osd_mine }}"
+  loop_control:
+    loop_var: replace_osd
+    label: "{{ replace_osd.name }} ({{ replace_osd.device }})"
+  changed_when: true
+  throttle: 1

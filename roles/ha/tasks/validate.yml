@@ -1,0 +1,180 @@
+---
+- name: Validate HA settings
+  vars:
+    ha_bad_resources: >-
+      {{ ha_resources_normalized | rejectattr('vmid', 'match', '^[1-9][0-9]*$') | map(attribute='id') | list
+         + ha_resources_normalized | rejectattr('type', 'in', ['', 'vm', 'ct']) | map(attribute='id') | list
+         + ha_resources_normalized | rejectattr('state', 'in', ha_states) | map(attribute='id') | list
+         + ha_resources_normalized | rejectattr('max_restart', 'match', '^[0-9]+$') | map(attribute='id') | list
+         + ha_resources_normalized | rejectattr('max_relocate', 'match', '^[0-9]+$') | map(attribute='id') | list }}
+    ha_duplicates: >-
+      {{ ha_resources_normalized | map(attribute='vmid') | list | community.general.counter | dict2items
+         | selectattr('value', 'gt', 1) | map(attribute='key') | list }}
+  ansible.builtin.assert:
+    that:
+      - ha_shutdown_policy in ha_policies
+      - ha_resources is sequence and ha_resources is not string
+      - ha_rules is sequence and ha_rules is not string
+      - ha_bad_resources | length == 0
+      - ha_duplicates | length == 0
+      - ha_timeout | int > 0
+    fail_msg: >-
+      Invalid HA settings: ha_shutdown_policy must be one of {{ ha_policies | join(', ') }} (is
+      '{{ ha_shutdown_policy }}'); ha_resources and ha_rules must be lists; each HA resource needs an id (VMID,
+      vm:<VMID> or ct:<VMID>), a state of {{ ha_states | join(', ') }} and non-negative max_restart and
+      max_relocate (invalid: {{ ha_bad_resources | unique | join(', ') or 'none' }}; listed twice:
+      {{ ha_duplicates | join(', ') or 'none' }}); ha_timeout must be positive.
+    quiet: true
+
+- name: Validate HA rules
+  vars:
+    ha_rule_vmids: "{{ ha_rule.resources | default([]) | map('string') | map('split', ':') | map('last') | list }}"
+    ha_rule_nodes: "{{ ha_rule.nodes | default([]) | map('string') | map('split', ':') | map('first') | list }}"
+  ansible.builtin.assert:
+    that:
+      - ha_rule.name | default('') is match('^[A-Za-z][A-Za-z0-9_.-]*$')
+      - ha_rule.type | default('') in ha_rule_types
+      - ha_rule_vmids | length > 0
+      - ha_rule_vmids | reject('in', ha_resources_normalized | map(attribute='vmid')) | list | length == 0
+      - >-
+        ha_rule.type | default('') != 'node-affinity'
+        or (ha_rule_nodes | length > 0 and ha_rule_nodes | reject('in', ha_node_names) | list | length == 0)
+      - >-
+        ha_rule.type | default('') != 'resource-affinity'
+        or (ha_rule.affinity | default('') in ['positive', 'negative'] and ha_rule_vmids | length > 1)
+    fail_msg: >-
+      HA rule '{{ ha_rule.name | default('?') }}' is invalid: it needs a name (letters, digits, - _ .), a type of
+      {{ ha_rule_types | join(' or ') }} and resources that are listed in ha_resources (found
+      {{ ha_rule_vmids | join(', ') or 'none' }}). A node-affinity rule needs nodes of this cluster
+      ({{ ha_node_names | join(', ') }}; found {{ ha_rule_nodes | join(', ') or 'none' }}); a resource-affinity
+      rule needs affinity positive or negative and at least two resources.
+    quiet: true
+  loop: "{{ ha_rules }}"
+  loop_control:
+    loop_var: ha_rule
+    label: "{{ ha_rule.name | default('?') }}"
+
+# Proxmox VE rejects these too, but only after the earlier rules are applied.
+- name: Assert that the rule names are unique and resources have one node-affinity rule
+  vars:
+    ha_rule_names: "{{ ha_rules | map(attribute='name') | list }}"
+    ha_node_rule_vmids: >-
+      {{ ha_rules | selectattr('type', 'eq', 'node-affinity') | map(attribute='resources') | flatten
+         | map('string') | map('split', ':') | map('last') | list }}
+    ha_multiple: >-
+      {{ ha_node_rule_vmids | community.general.counter | dict2items | selectattr('value', 'gt', 1)
+         | map(attribute='key') | list }}
+  ansible.builtin.assert:
+    that:
+      - ha_rule_names | unique | length == ha_rule_names | length
+      - ha_multiple | length == 0
+    fail_msg: >-
+      Every HA rule needs its own name (ha_rules uses {{ ha_rule_names | join(', ') }}), and a guest can only be
+      in one node-affinity rule ({{ ha_multiple | join(', ') or 'none' }} are in several; list all their nodes
+      with priorities in one rule).
+    quiet: true
+
+- name: Check that the nodes form a cluster
+  ansible.builtin.stat:
+    path: /etc/pve/corosync.conf
+  register: ha_corosync
+
+- name: Assert that the nodes form a cluster
+  ansible.builtin.assert:
+    that: ha_corosync.stat.exists
+    fail_msg: HA needs a cluster; create it first (cluster role, `setup.yml --tags cluster`).
+    quiet: true
+
+- name: List the guests of the cluster
+  ansible.builtin.command: pvesh get /cluster/resources --type vm --output-format json
+  register: ha_guest_list
+  changed_when: false
+  check_mode: false
+  run_once: true
+
+# The full sid (vm:100 / ct:101) and node of every HA resource.
+- name: Resolve the HA resources
+  vars:
+    ha_guests: "{{ ha_guest_list.stdout | from_json }}"
+  ansible.builtin.set_fact:
+    ha_wanted: >-
+      {%- set result = [] -%}
+      {%- for r in ha_resources_normalized -%}
+      {%-   set guest = ha_guests | selectattr('vmid', 'eq', r.vmid | int) | first | default({}) -%}
+      {%-   set type = {'qemu': 'vm', 'lxc': 'ct'}[guest.type] if guest else '' -%}
+      {%-   set _ = result.append(r | combine({'sid': (r.type or type or 'vm') ~ ':' ~ r.vmid, 'guest_type': type,
+                                               'node': guest.node | default(''), 'name': guest.name | default('')})) -%}
+      {%- endfor -%}
+      {{ result }}
+  run_once: true
+
+- name: Assert that the HA guests exist
+  vars:
+    ha_missing: "{{ ha_wanted | selectattr('guest_type', 'eq', '') | map(attribute='id') | list }}"
+    ha_mismatch: >-
+      {{ ha_wanted | selectattr('type', 'eq', 'vm') | selectattr('guest_type', 'eq', 'ct') | list
+         + ha_wanted | selectattr('type', 'eq', 'ct') | selectattr('guest_type', 'eq', 'vm') | list }}
+  ansible.builtin.assert:
+    that:
+      - ha_missing | length == 0
+      - ha_mismatch | length == 0
+    fail_msg: >-
+      {%- if ha_missing %}HA resources {{ ha_missing | join(', ') }} do not exist on the cluster. Create the guests
+      first, then run `setup.yml --tags ha`, or remove them from ha_resources.{% endif %}
+      {% if ha_mismatch %}HA resources {{ ha_mismatch | map(attribute='id') | join(', ') }} name the wrong guest type:
+      {% for r in ha_mismatch %}{{ r.vmid }} is a {{ r.guest_type }}{{ ', ' if not loop.last }}{% endfor %}.{% endif %}
+    quiet: true
+  run_once: true
+
+- name: Get the configuration of the HA guests
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - get
+      - "/nodes/{{ ha_guest.node }}/{{ 'qemu' if ha_guest.guest_type == 'vm' else 'lxc' }}/{{ ha_guest.vmid }}/config"
+      - --output-format
+      - json
+  loop: "{{ ha_wanted }}"
+  loop_control:
+    loop_var: ha_guest
+    label: "{{ ha_guest.sid }}"
+  register: ha_guest_configs
+  changed_when: false
+  check_mode: false
+  run_once: true
+
+- name: List the storages
+  ansible.builtin.command: pvesh get /storage --output-format json
+  register: ha_storages
+  changed_when: false
+  check_mode: false
+  run_once: true
+
+# A guest with a disk (or CD image, unused disk, mount point) on node-local
+# storage cannot be started on another node, which defeats HA; Proxmox VE
+# accepts such HA resources anyway.
+- name: Assert that the HA guests only use shared storage
+  vars:
+    ha_shared: >-
+      {{ ha_storages.stdout | from_json | selectattr('shared', 'defined') | selectattr('shared', 'eq', 1)
+         | map(attribute='storage') | list }}
+    ha_local: >-
+      {%- set result = [] -%}
+      {%- for config in ha_guest_configs.results -%}
+      {%-   for key, value in (config.stdout | from_json) | dictsort -%}
+      {%-     set volume = value | string | split(',') | first -%}
+      {%-     if key is match('^(ide|sata|scsi|virtio|efidisk|tpmstate|unused|mp)[0-9]+$|^rootfs$')
+               and volume not in ['none', 'cdrom', '']
+               and (':' not in volume or volume.split(':') | first not in ha_shared) -%}
+      {%-       set _ = result.append(config.ha_guest.sid ~ ' ' ~ key ~ ' (' ~ volume ~ ')') -%}
+      {%-     endif -%}
+      {%-   endfor -%}
+      {%- endfor -%}
+      {{ result }}
+  ansible.builtin.assert:
+    that: ha_local | length == 0
+    fail_msg: >-
+      HA guests use storage that only one node can reach: {{ ha_local | join(', ') }}. Move these disks to Ceph
+      ({{ ha_shared | join(', ') }}) with Disk Action → Move Storage, eject the CD image, or remove the unused disk.
+    quiet: true
+  run_once: true

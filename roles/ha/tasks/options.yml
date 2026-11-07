@@ -1,0 +1,21 @@
+---
+- name: Get cluster options
+  ansible.builtin.command: pvesh get /cluster/options --output-format json
+  register: ha_cluster_options
+  changed_when: false
+  check_mode: false
+  run_once: true
+
+# The ha option is returned either as property string or as object; without
+# it, Proxmox VE uses conditional.
+- name: Set the HA shutdown policy
+  vars:
+    ha_current: "{{ (ha_cluster_options.stdout | from_json).ha | default({}) }}"
+    ha_current_policy: >-
+      {{ ha_current.shutdown_policy | default('conditional') if ha_current is mapping
+         else ha_current | regex_search('shutdown_policy=([a-z]+)', '\1') | default(['conditional'], true) | first }}
+  ansible.builtin.command:
+    argv: [pvesh, set, /cluster/options, --ha, "shutdown_policy={{ ha_shutdown_policy }}"]
+  changed_when: true
+  run_once: true
+  when: ha_current_policy != ha_shutdown_policy

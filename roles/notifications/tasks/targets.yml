@@ -1,0 +1,128 @@
+---
+# Endpoints and matchers live in /etc/pve/notifications.cfg (secrets in
+# /etc/pve/priv/notifications.cfg) and are configured once for the cluster.
+# There is no community.proxmox module for them yet.
+
+- name: List the notification targets
+  ansible.builtin.command: pvesh get /cluster/notifications/targets --output-format json
+  register: notifications_current_targets
+  changed_when: false
+  check_mode: false
+  run_once: true
+
+- name: List the notification endpoints
+  ansible.builtin.command: pvesh get /cluster/notifications/endpoints/{{ notifications_endpoint_type }} --output-format json
+  loop: [gotify, webhook]
+  loop_control:
+    loop_var: notifications_endpoint_type
+  register: notifications_current_endpoints
+  changed_when: false
+  check_mode: false
+  run_once: true
+
+- name: List the notification matchers
+  ansible.builtin.command: pvesh get /cluster/notifications/matchers --output-format json
+  register: notifications_current_matchers
+  changed_when: false
+  check_mode: false
+  run_once: true
+
+# {name: comment} of the gotify and webhook endpoints.
+- name: Note the current notification configuration
+  ansible.builtin.set_fact:
+    notifications_existing: >-
+      {%- set existing = {} -%}
+      {%- for endpoint in notifications_current_endpoints.results | map(attribute='stdout') | map('from_json') | flatten -%}
+      {%-   set _ = existing.update({endpoint.name: endpoint.comment | default('', true) | string}) -%}
+      {%- endfor -%}
+      {{ existing }}
+    notifications_existing_types: >-
+      {{ notifications_current_targets.stdout | from_json | items2dict(key_name='name', value_name='type') }}
+    notifications_existing_matcher: >-
+      {{ notifications_current_matchers.stdout | from_json | selectattr('name', 'eq', notifications_matcher)
+         | first | default({}) }}
+  run_once: true
+
+- name: Note the targets created by proxspray and those to create or update
+  ansible.builtin.set_fact:
+    notifications_ours: >-
+      {{ notifications_existing | dict2items | selectattr('value', 'match', notifications_marker)
+         | map(attribute='key') | list }}
+    notifications_to_change: >-
+      {%- set names = [] -%}
+      {%- for endpoint in notifications_endpoints -%}
+      {%-   if notifications_existing[endpoint.name] | default('') != endpoint.comment -%}
+      {%-     set _ = names.append(endpoint.name) -%}
+      {%-   endif -%}
+      {%- endfor -%}
+      {{ names }}
+  run_once: true
+
+- name: Assert that the target names are free
+  vars:
+    notifications_taken: >-
+      {{ notifications_endpoints | map(attribute='name') | select('in', notifications_existing_types.keys() | list)
+         | reject('in', notifications_ours) | list }}
+  ansible.builtin.assert:
+    that: notifications_taken | length == 0
+    fail_msg: >-
+      Notification targets {{ notifications_taken | join(', ') }} exist already and were not created by proxspray.
+      Rename them in notifications_targets or remove them under Datacenter → Notifications.
+    quiet: true
+  run_once: true
+
+- name: Create or update notification targets
+  ansible.builtin.command:
+    argv: >-
+      {{ (['pvesh', 'set', '/cluster/notifications/endpoints/' ~ notifications_endpoint.type ~ '/' ~ notifications_endpoint.name]
+          + notifications_endpoint.args
+          + (['--delete', notifications_endpoint.delete | join(',')] if notifications_endpoint.delete else [])
+          if notifications_endpoint.name in notifications_existing else
+          ['pvesh', 'create', '/cluster/notifications/endpoints/' ~ notifications_endpoint.type,
+           '--name', notifications_endpoint.name] + notifications_endpoint.args)
+         + ['--comment', notifications_endpoint.comment] }}
+  loop: "{{ notifications_endpoints }}"
+  loop_control:
+    loop_var: notifications_endpoint
+    label: "{{ notifications_endpoint.name }}"
+  changed_when: true
+  when: notifications_endpoint.name in notifications_to_change
+  no_log: true
+  run_once: true
+
+- name: Create or update the notification matcher
+  ansible.builtin.command:
+    argv: >-
+      {{ (['pvesh', 'set', '/cluster/notifications/matchers/' ~ notifications_matcher]
+          if notifications_existing_matcher else
+          ['pvesh', 'create', '/cluster/notifications/matchers', '--name', notifications_matcher])
+         + notifications_matcher_args + ['--comment', notifications_matcher_comment | trim]
+         + (['--delete', 'match-severity']
+            if notifications_existing_matcher and '--match-severity' not in notifications_matcher_args else []) }}
+  changed_when: true
+  run_once: true
+  when:
+    - notifications_targets | length > 0
+    - notifications_existing_matcher.comment | default('') != notifications_matcher_comment | trim
+
+- name: Remove the notification matcher without targets
+  ansible.builtin.command:
+    argv: [pvesh, delete, "/cluster/notifications/matchers/{{ notifications_matcher }}"]
+  changed_when: true
+  run_once: true
+  when:
+    - notifications_targets | length == 0
+    - notifications_existing_matcher.comment | default('') is match(notifications_marker)
+
+# After the matcher, which may still refer to them.
+- name: Remove notification targets that are no longer configured
+  ansible.builtin.command:
+    argv:
+      - pvesh
+      - delete
+      - /cluster/notifications/endpoints/{{ notifications_existing_types[notifications_stale] }}/{{ notifications_stale }}
+  loop: "{{ notifications_ours | reject('in', notifications_endpoints | map(attribute='name')) | list }}"
+  loop_control:
+    loop_var: notifications_stale
+  changed_when: true
+  run_once: true

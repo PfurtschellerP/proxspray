@@ -25,8 +25,10 @@ install_media_fqdn: "{{ inventory_hostname }}.{{ install_media_domain }}"
 install_media_ip: "{{ node_ip | default(ansible_host) }}"
 install_media_prefix: 24
 install_media_gateway: ""
-# A single DNS server (the installer accepts only one; add more later).
-install_media_dns: ""
+# DNS servers, a list (or a single address), at most 3, tried in order. The
+# installer only accepts one and gets the first; the proxmox role configures
+# all of them (proxmox_dns_servers), so the others are the fallback.
+install_media_dns: []
 
 # udev properties (globs allowed) that select the management interface; the
 # first interface matching any of them gets the address. On identical

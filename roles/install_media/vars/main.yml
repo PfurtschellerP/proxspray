@@ -21,3 +21,6 @@ install_media_filesystem_section: >-
   {{ {'ext4': 'lvm', 'xfs': 'lvm', 'zfs': 'zfs', 'btrfs': 'btrfs'}[install_media_filesystem] | default('lvm') }}
 
 install_media_ipv4_pattern: '^((25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])$'
+
+# install_media_dns as a list, whether it is given as a string or a list.
+install_media_dns_servers: "{{ [install_media_dns] | flatten | select | list }}"

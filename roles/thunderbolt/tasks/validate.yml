@@ -8,9 +8,11 @@
       - thunderbolt_devices.values() | map(attribute='pci_path', default='') | select | list | length == thunderbolt_devices | length
       - thunderbolt_mtu | int >= 68
       - thunderbolt_mtu | int <= 65520
+      - thunderbolt_min_link_speed | float >= 0
     fail_msg: >-
       thunderbolt_devices must map interface names (max. 15 characters, letters, digits, '-' and '_')
-      to a dict with a pci_path, and thunderbolt_mtu must be between 68 and 65520.
+      to a dict with a pci_path, thunderbolt_mtu must be between 68 and 65520 and thunderbolt_min_link_speed
+      a number of Gb/s (0 disables the check).
     quiet: true
 
 - name: Check that ifupdown2 is available

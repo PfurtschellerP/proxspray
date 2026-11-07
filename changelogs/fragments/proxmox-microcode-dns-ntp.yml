@@ -1,0 +1,7 @@
+---
+minor_changes:
+  - proxmox - install the CPU microcode package for the detected CPU (``intel-microcode`` or ``amd64-microcode``) and add Debian's ``non-free-firmware`` component if no source enables it (``proxmox_cpu_microcode``).
+  - proxmox - configure up to three DNS servers through the Proxmox VE node DNS settings, by default all servers of ``install_media_dns`` (``proxmox_dns_servers``, ``proxmox_dns_search``).
+  - proxmox - let the nodes synchronise their clocks with each other as chrony peers in orphan mode, so they keep a common time for Ceph when the NTP servers are unreachable (``proxmox_ntp_peers``).
+  - proxmox, certificates - install proxmoxer 2.3 into the virtualenv ``/opt/proxspray/venv`` and run the ``community.proxmox`` modules with it, because they need a newer proxmoxer than Debian 13 ships.
+  - install_media - ``install_media_dns`` accepts a list of up to three DNS servers; the installer gets the first, the proxmox role configures all of them.

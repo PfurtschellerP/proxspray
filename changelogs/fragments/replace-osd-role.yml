@@ -1,0 +1,3 @@
+---
+major_changes:
+  - replace_osd - new role and ``replace_osd.yml`` playbook that remove failed or failing Ceph OSDs so their disks can be swapped. The OSDs to remove must be confirmed with ``replace_osd_confirm``; a running OSD is only removed when Ceph reports it is ok to stop, a down one only while all placement groups stay active. The OSD is marked out, stopped, destroyed (its disk wiped if it still works) and the next steps name the disk to swap; ``setup.yml --tags ceph`` creates the new OSD.

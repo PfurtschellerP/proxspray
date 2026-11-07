@@ -1,0 +1,38 @@
+---
+# Only targets that changed get a test message, so repeated runs stay quiet.
+- name: Send a test notification to new or changed targets
+  ansible.builtin.command:
+    argv: [pvesh, create, "/cluster/notifications/targets/{{ notifications_changed }}/test"]
+  loop: "{{ notifications_to_change }}"
+  loop_control:
+    loop_var: notifications_changed
+  register: notifications_test
+  changed_when: false
+  failed_when: false
+  run_once: true
+
+- name: Assert that the test notifications were sent
+  ansible.builtin.assert:
+    that: notifications_test.results | default([]) | rejectattr('rc', 'eq', 0) | list | length == 0
+    fail_msg: >-
+      Sending a test notification to
+      {{ notifications_test.results | rejectattr('rc', 'eq', 0) | map(attribute='notifications_changed') | join(', ') }}
+      failed: {{ notifications_test.results | rejectattr('rc', 'eq', 0) | map(attribute='stderr') | join(' ') }}
+      Check the token, chat ID or topic and that the node reaches the service (`journalctl -u pvedaemon`).
+    quiet: true
+  run_once: true
+
+- name: Run the health check
+  ansible.builtin.command:
+    argv: ["{{ notifications_script }}", --print]
+  register: notifications_health
+  changed_when: false
+  when: notifications_healthcheck | bool
+
+- name: Show the current problems
+  ansible.builtin.debug:
+    msg: >-
+      {{ (notifications_health.stdout | from_json).problems.values() | list
+         or 'No problems found; notifications are sent when one lasts longer than '
+            ~ notifications_healthcheck_grace ~ ' seconds.' }}
+  when: notifications_healthcheck | bool
