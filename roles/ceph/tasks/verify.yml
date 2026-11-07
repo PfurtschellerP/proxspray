@@ -20,7 +20,7 @@
   ansible.builtin.assert:
     that: ceph_healthy
     fail_msg: >-
-      Ceph is not healthy with all {{ ceph_osds_expected }} OSDs up and in and all PGs active+clean after
+      Ceph is not healthy with all OSDs up and in (at least {{ ceph_osds_expected }} on the nodes of this run) and all PGs active+clean after
       {{ ceph_verify_timeout }} seconds: {{ ceph_health_detail.stdout | default('') }} Check `ceph -s` and
       `ceph osd tree`.
     quiet: true

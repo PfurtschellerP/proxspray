@@ -28,12 +28,12 @@
     that:
       - ceph_media_k | int >= 2
       - ceph_media_m | int >= 1
-      - ceph_media_k | int + ceph_media_m | int <= ansible_play_hosts_all | length
+      - ceph_media_k | int + ceph_media_m | int <= groups['all'] | length
       - ceph_media_min_size | int >= ceph_media_k | int
       - ceph_media_min_size | int <= ceph_media_k | int + ceph_media_m | int
       - ceph_media_directory is match('^[A-Za-z0-9._-]+$')
     fail_msg: >-
-      The media pool needs k >= 2 and m >= 1 chunks on k+m different nodes ({{ ansible_play_hosts_all | length }}
+      The media pool needs k >= 2 and m >= 1 chunks on k+m different nodes ({{ groups['all'] | length }}
       available, got k={{ ceph_media_k }} m={{ ceph_media_m }}), min_size between k and k+m (got
       {{ ceph_media_min_size }}) and a plain directory name (got '{{ ceph_media_directory }}').
     quiet: true
