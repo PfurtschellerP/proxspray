@@ -1,3 +1,0 @@
----
-trivial:
-  - Add ansible-lint and yamllint configuration, GitHub Actions for linting, sanity tests, builds and releases, and Renovate for dependency updates.

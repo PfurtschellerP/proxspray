@@ -74,7 +74,7 @@ ansible-galaxy collection install pfurtschellerp.proxspray
 ansible-playbook -i inventory.ini pfurtschellerp.proxspray.setup
 ```
 
-> 💡 Prefer a ready-made toolchain? Open the repo in the included **Dev Container** — Ansible, `ansible-lint` and all collections are preinstalled.
+> 💡 Prefer a ready-made toolchain? Open the repo in the included **Dev Container** — Ansible, `ansible-lint`, all collections, `just` and the GitHub CLI are preinstalled. Run `gh auth login` to use it; the login is lost when the container is rebuilt.
 
 ## ⚙️ Configuration
 

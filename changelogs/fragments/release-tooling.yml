@@ -1,3 +1,0 @@
----
-trivial:
-  - Add ``scripts/release.sh`` and a ``justfile`` (``just check``, ``just release-prepare``, ``just release-tag``) for preparing and tagging releases; release pull requests no longer need a changelog fragment.
