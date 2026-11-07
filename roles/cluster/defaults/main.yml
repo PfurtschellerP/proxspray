@@ -21,5 +21,15 @@ cluster_join_address: >-
 cluster_links:
   - "{{ node_ip | default(ansible_facts.default_ipv4.address) }}"
 
+# Addresses of this node on corosync links that other roles add once the
+# cluster exists, as {link number: address}. A node that joins such a cluster
+# later (e.g. after a reinstall) must bring an address for every link of the
+# cluster. Defaults to the fabric role's link: the node's fabric router ID on
+# fabric_corosync_linknumber, from the same inventory variables.
+cluster_join_extra_links: >-
+  {{ {(fabric_corosync_linknumber | default(1) | int):
+      fabric_router_id | default((fabric_ip_prefix | default('10.100.0.0/24') | split('.'))[:3] | join('.') ~ '.' ~ node_id | default(''))}
+     if fabric_corosync_link | default(true) | bool else {} }}
+
 # Seconds to wait for the cluster to become quorate after creating or joining.
 cluster_quorum_timeout: 120

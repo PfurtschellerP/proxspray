@@ -1,5 +1,15 @@
 ---
+# {link number: address} of this node: cluster_links in order, then the links
+# other roles add later (cluster_join_extra_links).
+cluster_link_map: >-
+  {{ dict(range(cluster_links | length) | zip(cluster_links | map('trim')))
+     | combine(cluster_join_extra_links) }}
+
+# Links to pass: all links of an existing cluster when joining it, otherwise
+# cluster_links.
+cluster_link_numbers: "{{ cluster_existing_links | default([], true) or range(cluster_links | length) | list }}"
+
 # ['--link0', '<address>', '--link1', '<address>', ...]
 cluster_link_args: >-
-  {{ range(cluster_links | length) | map('regex_replace', '^', '--link')
-     | zip(cluster_links | map('trim')) | flatten }}
+  {{ cluster_link_numbers | map('string') | map('regex_replace', '^', '--link')
+     | zip(cluster_link_numbers | map('extract', cluster_link_map)) | flatten }}
