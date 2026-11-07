@@ -1,0 +1,55 @@
+---
+# Proxmox VE node name, also the name of this node's Ceph daemons.
+ceph_node: "{{ ansible_facts.hostname }}"
+
+# Major version of each release, to upgrade packages from an older release.
+ceph_release_major:
+  squid: 19
+  tentacle: 20
+
+# The packages `pveceph install` installs, plus attr for the CephFS layout.
+ceph_packages:
+  - ceph
+  - ceph-common
+  - ceph-fuse
+  - ceph-mds
+  - ceph-volume
+  - gdisk
+  - nvme-cli
+  - attr
+
+ceph_conf: /etc/pve/ceph.conf
+ceph_fs_mount: /mnt/pve/{{ ceph_fs_name }}
+ceph_media_path: "{{ ceph_fs_mount }}/{{ ceph_media_directory }}"
+ceph_media_profile: proxspray-k{{ ceph_media_k }}m{{ ceph_media_m }}
+
+ceph_gib: 1073741824
+ceph_retries: "{{ (ceph_verify_timeout | int / 10) | round(0, 'ceil') | int }}"
+
+# Cluster-wide settings, as values of `ceph config get`.
+ceph_settings:
+  - who: osd
+    name: osd_memory_target
+    value: "{{ (ceph_osd_memory_target | float * ceph_gib) | int | string }}"
+  - who: mds
+    name: mds_cache_memory_limit
+    value: "{{ (ceph_mds_cache_memory_limit | float * ceph_gib) | int | string }}"
+
+# Settings of the erasure-coded media pool, as `ceph osd pool get` reports them.
+# FastEC (allow_ec_optimizations) exists since Tentacle.
+ceph_media_pool_settings: >-
+  {{ {'allow_ec_overwrites': 'true',
+      'min_size': ceph_media_min_size | string,
+      'target_size_ratio': ceph_media_target_size_ratio | string}
+     | combine({'allow_ec_optimizations': 'true'} if ceph_release_major[ceph_release] >= 20 else {}) }}
+
+# Used by verify.yml with the registered `ceph status` result.
+ceph_osds_expected: "{{ ansible_play_hosts_all | map('extract', hostvars, 'ceph_osd_count') | map('int') | sum }}"
+ceph_status: "{{ ceph_health.stdout | default('{}', true) | from_json }}"
+ceph_healthy: >-
+  {{ ceph_health.rc | default(1) == 0
+     and ceph_status.health.status | default('') == 'HEALTH_OK'
+     and ceph_status.osdmap.num_osds | default(0) | int == ceph_osds_expected | int
+     and ceph_status.osdmap.num_up_osds | default(0) | int == ceph_osds_expected | int
+     and ceph_status.osdmap.num_in_osds | default(0) | int == ceph_osds_expected | int
+     and ceph_status.pgmap.pgs_by_state | default([]) | rejectattr('state_name', 'eq', 'active+clean') | list | length == 0 }}

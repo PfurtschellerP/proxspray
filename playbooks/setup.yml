@@ -38,6 +38,15 @@
     - role: fabric
       tags: fabric
 
+# Ceph's networks are on the fabric, so it follows the mesh.
+- name: Configure Ceph
+  hosts: all
+  gather_facts: false
+  become: true
+  roles:
+    - role: ceph
+      tags: ceph
+
 - name: Configure certificates
   hosts: all
   gather_facts: false

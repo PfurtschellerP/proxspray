@@ -29,7 +29,8 @@ formatting. This file only lists what the linters don't check.
     (`ansible-playbook pfurtschellerp.proxspray.setup`) Ansible resolves them
     inside the collection. Both ways must keep working.
 - Play order in `playbooks/setup.yml`: Ansible version check → facts of all
-  nodes → `proxmox` → `cluster` → `thunderbolt` + `fabric` → `certificates`.
+  nodes → `proxmox` → `cluster` → `thunderbolt` + `fabric` → `ceph` →
+  `certificates`.
   Every role has a tag with its own name.
 - Other top-level playbooks follow the same pattern: `install_media.yml`
   (runs on the controller, every task `delegate_to: localhost`) and

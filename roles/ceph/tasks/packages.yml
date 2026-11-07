@@ -1,0 +1,30 @@
+---
+- name: Gather installed packages
+  ansible.builtin.package_facts:
+
+# Tentacle creates aes256k keys without '==' padding, which older Proxmox VE
+# storage code rejects ("Not a proper rbd authentication file"), so the Ceph
+# storages would never become active.
+- name: Assert that Proxmox VE supports the Ceph release
+  vars:
+    ceph_storage_lib: "{{ (ansible_facts.packages['libpve-storage-perl'] | default([{}]) | first).version | default('0') }}"
+  ansible.builtin.assert:
+    that: ceph_release != 'tentacle' or ceph_storage_lib is version('9.1.15', '>=')
+    fail_msg: >-
+      Ceph Tentacle needs libpve-storage-perl 9.1.15 or newer, {{ inventory_hostname }} has {{ ceph_storage_lib }}.
+      Upgrade Proxmox VE first, e.g. with proxmox_apt_upgrade: true (proxmox role) or `apt full-upgrade`.
+    quiet: true
+
+# Proxmox VE ships the Ceph client of its default release; a newer release
+# needs an upgrade instead of an install.
+- name: Install Ceph packages
+  vars:
+    ceph_installed_major: "{{ ((ansible_facts.packages['ceph-common'] | default([{}]) | first).version | default('0')).split('.') | first | int }}"
+  ansible.builtin.apt:
+    name: "{{ ceph_packages }}"
+    state: >-
+      {{ 'latest' if ceph_installed_major | int < ceph_release_major[ceph_release] else 'present' }}
+    install_recommends: false
+    update_cache: true
+    cache_valid_time: 3600
+  notify: Reload the Proxmox VE API daemons

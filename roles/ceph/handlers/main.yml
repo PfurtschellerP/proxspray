@@ -1,0 +1,11 @@
+---
+# The API daemons load the RADOS library only on start.
+- name: Reload the Proxmox VE API daemons
+  ansible.builtin.systemd_service:
+    name: "{{ ceph_api_daemon }}"
+    state: reloaded
+  loop:
+    - pvedaemon
+    - pveproxy
+  loop_control:
+    loop_var: ceph_api_daemon

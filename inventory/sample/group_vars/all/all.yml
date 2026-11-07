@@ -51,6 +51,15 @@
 # cluster_name: proxspray
 # cluster_init_node: node-1
 
+## Ceph (roles/ceph)
+# ceph_osd_devices: auto                     # every empty non-USB disk; or a list of /dev paths per host
+# ceph_osd_model: ""                         # with auto, a regex on the disk model, e.g. ^Samsung_SSD_870
+# ceph_osd_memory_target: 3                  # GiB per OSD (Ceph default 4)
+# ceph_mds_cache_memory_limit: 1             # GiB per MDS (Ceph default 4)
+# ceph_vm_pool_target_size_ratio: 0.2        # expected shares of the capacity
+# ceph_media_target_size_ratio: 0.7
+# ceph_media_min_size: 2                     # 2: media stays available with a node down; 3: Ceph's safer default
+
 ## Certificates (roles/certificates)
 # certificates_mode: self_signed             # self_signed | acme
 # certificates_fetch_ca: false               # copy pve-root-ca.pem to <inventory>/artifacts/

@@ -1,0 +1,97 @@
+---
+# Monitors are added one at a time; the first one also creates a manager.
+- name: Check for the monitor of this node
+  ansible.builtin.stat:
+    path: /var/lib/ceph/mon/ceph-{{ ceph_node }}
+  register: ceph_mon_dir
+
+- name: Create the monitor of this node
+  ansible.builtin.command:
+    argv:
+      - pveceph
+      - mon
+      - create
+      - --mon-address
+      - "{{ ceph_mon_address | trim }}"
+  throttle: 1
+  changed_when: true
+  when: not ceph_mon_dir.stat.exists
+
+- name: Check for the manager of this node
+  ansible.builtin.stat:
+    path: /var/lib/ceph/mgr/ceph-{{ ceph_node }}
+  register: ceph_mgr_dir
+
+- name: Create the manager of this node
+  ansible.builtin.command: pveceph mgr create
+  throttle: 1
+  changed_when: true
+  when: not ceph_mgr_dir.stat.exists
+
+- name: List the disks of this node
+  ansible.builtin.command: pvesh get /nodes/{{ ceph_node }}/disks/list --output-format json
+  register: ceph_disks
+  changed_when: false
+  check_mode: false
+
+# Resolves listed /dev/disk/by-id links to the kernel names Proxmox VE reports.
+- name: Resolve the listed OSD disks
+  ansible.builtin.stat:
+    path: "{{ ceph_osd_device }}"
+    follow: false
+    get_checksum: false
+  loop: "{{ ceph_osd_devices if ceph_osd_devices != 'auto' else [] }}"
+  loop_control:
+    loop_var: ceph_osd_device
+  register: ceph_osd_links
+
+# Shared through hostvars: verify.yml expects ceph_osd_count OSDs per node.
+- name: Choose the OSD disks
+  vars:
+    # Proxmox VE omits fields, e.g. 'used' of an empty disk.
+    ceph_disk_list: >-
+      {%- set disks = [] -%}
+      {%- for disk in ceph_disks.stdout | from_json -%}
+      {%-   set _ = disks.append({'type': '', 'used': '', 'model': '', 'osdid': -1} | combine(disk)) -%}
+      {%- endfor -%}
+      {{ disks }}
+    ceph_osd_existing: "{{ ceph_disk_list | rejectattr('osdid', 'in', [-1, '-1']) | list }}"
+    ceph_osd_listed: "{{ ceph_osd_links.results | map(attribute='stat') | map(attribute='lnk_source', default='') | list }}"
+    ceph_osd_wanted: >-
+      {{ ceph_disk_list | rejectattr('type', 'eq', 'usb') | selectattr('model', 'search', ceph_osd_model) | list
+         if ceph_osd_devices == 'auto' else
+         ceph_disk_list | selectattr('devpath', 'in',
+           ceph_osd_listed | zip(ceph_osd_devices) | map('select') | map('first') | list) | list }}
+  ansible.builtin.set_fact:
+    ceph_osd_new: "{{ ceph_osd_wanted | rejectattr('used') | rejectattr('devpath', 'in', ceph_osd_existing | map(attribute='devpath')) | list }}"
+    ceph_osd_blocked: >-
+      {{ ceph_osd_wanted | selectattr('used') | rejectattr('devpath', 'in', ceph_osd_existing | map(attribute='devpath')) | list
+         if ceph_osd_devices != 'auto' else [] }}
+    ceph_osd_count: "{{ ceph_osd_existing | length + ceph_osd_wanted | rejectattr('used') | list | length }}"
+
+- name: Assert that the OSD disks are usable
+  ansible.builtin.assert:
+    that:
+      - ceph_osd_blocked | length == 0
+      - ceph_osd_count | int > 0
+    fail_msg: >-
+      {% if ceph_osd_blocked | length > 0 %}{{ ceph_osd_blocked | map(attribute='devpath') | join(', ') }} on
+      {{ inventory_hostname }} is in use ({{ ceph_osd_blocked | map(attribute='used') | join(', ') }}); check that
+      it is the right disk, then wipe it, e.g. with `ceph-volume lvm zap --destroy <disk>`.
+      {% else %}{{ inventory_hostname }} has no OSD and no empty disk{{ ' matching ' ~ ceph_osd_model if ceph_osd_model }}.
+      Wipe the data disk (e.g. install_media_wipe_disks or `ceph-volume lvm zap --destroy <disk>`), see
+      `pvesh get /nodes/{{ ceph_node }}/disks/list`.{% endif %}
+    quiet: true
+
+- name: Create OSDs
+  ansible.builtin.command:
+    argv:
+      - pveceph
+      - osd
+      - create
+      - "{{ ceph_osd_disk.devpath }}"
+  loop: "{{ ceph_osd_new }}"
+  loop_control:
+    loop_var: ceph_osd_disk
+    label: "{{ ceph_osd_disk.devpath }} ({{ ceph_osd_disk.model | default('') }})"
+  changed_when: true

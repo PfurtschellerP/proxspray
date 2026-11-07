@@ -46,7 +46,7 @@ An Ansible collection (`pfurtschellerp.proxspray`) that turns three mini PCs int
 | ✅ | Routed full mesh over Thunderbolt with a Proxmox VE SDN OpenFabric fabric, verified end to end (routes, full-MTU pings) |
 | ✅ | Mesh as redundant corosync link and as live migration network |
 | ✅ | Certificates from the cluster CA, optionally ACME (Let's Encrypt) with automatic renewal |
-| 🚧 | Ceph (Tentacle) deployment on the Thunderbolt mesh |
+| ✅ | Ceph (Tentacle) on the Thunderbolt mesh: RBD pool for VM disks, CephFS with an erasure-coded media directory |
 
 ## 🚀 Quick start
 
@@ -96,6 +96,7 @@ The commonly changed settings are listed in [inventory/sample/group_vars/all/all
 | [cluster](roles/cluster/defaults/main.yml) | Create and join the cluster | `cluster_name`, `cluster_init_node`, `cluster_links` |
 | [thunderbolt](roles/thunderbolt/defaults/main.yml) | Thunderbolt links | `thunderbolt_devices` (interface → port path), `thunderbolt_mtu` |
 | [fabric](roles/fabric/defaults/main.yml) | Routed mesh, corosync link, migration network | `fabric_ip_prefix`, `fabric_corosync_link`, `fabric_migration_network`, `fabric_migration_type` |
+| [ceph](roles/ceph/defaults/main.yml) | Ceph monitors, managers, metadata servers, OSDs, pools, CephFS | `ceph_osd_devices`, `ceph_osd_model`, `ceph_media_*`, `ceph_osd_memory_target` |
 | [certificates](roles/certificates/defaults/main.yml) | Web interface / API certificates | `certificates_mode`, `certificates_acme_*` |
 
 ### 💿 Installing the nodes
@@ -122,13 +123,27 @@ ansible-playbook -i inventory/mycluster/inventory.ini reinstall.yml setup.yml -e
 - **SSH host keys stay the same.** `install_media` takes the keys of the running nodes (or generates them) into `inventory/<cluster>/credentials/`, a first-boot hook restores them before sshd starts, and they are added to your `known_hosts`. Neither Ansible nor the other cluster nodes see a changed host key.
 - **Other disks:** the installer only touches its target disks. With `install_media_wipe_disks: true` the first boot also wipes every other disk except USB devices (partition tables and LVM, Ceph or ZFS signatures), e.g. to reuse a Ceph disk; it finds the system disks by what the new system uses, not by name.
 - **Network:** `install_media_interface_filter` selects the management port by udev properties, e.g. `{ID_NET_NAME_PATH: enp86s0}` once for identical machines, or by MAC with `node_mac` per host.
-- **Single nodes** can be reinstalled with `--limit`; the remaining nodes must keep quorum, and the old node is removed from the cluster before `setup.yml` joins it again.
+- **Single nodes** can be reinstalled with `--limit`; the remaining nodes must keep quorum, and the old node is removed from the cluster before `setup.yml` joins it again. With Ceph, all PGs must be `active+clean` first and `install_media_wipe_disks` must be on; the remaining nodes forget the old monitor, OSDs and daemon keys, and Ceph rebuilds the data on the new OSD.
 - **Safeguards:** `reinstall_confirm` must list exactly the selected nodes, nodes with guests are refused (`reinstall_destroy_guests`), and the firmware must boot the system disk first so the stick never boots by accident.
 - **Tools:** `proxmox-auto-install-assistant` and `xorriso` are in the Dev Container; elsewhere install them from the Proxmox VE repository. The ISOs and `credentials/` contain secrets and are git-ignored.
 
 ### 🕸️ Thunderbolt fabric
 
 The cluster is created on the management network first, because the fabric is cluster-wide SDN configuration. The `fabric` role then defines an OpenFabric fabric (`tbmesh`) with every node's router ID and its Thunderbolt interfaces, applies it, and waits until each node reaches all others over the mesh. It then adds the mesh as corosync link 1, with link 0 on the management network kept preferred, and sets the cluster's migration network. When you set up Ceph, choose the fabric network (`10.100.0.0/24`).
+
+### 🐙 Ceph
+
+Ceph runs hyper-converged on the three nodes, entirely on the Thunderbolt fabric (`10.100.0.0/24`), and is managed like any Proxmox VE Ceph cluster in the web interface. Every node runs a monitor, a manager and a metadata server. Every empty disk that is not a USB device becomes an OSD (`ceph_osd_devices: auto`, optionally narrowed by a model pattern in `ceph_osd_model`); disks with partitions or data, like the system disk, are never used. No disk IDs are needed in the inventory.
+
+| Storage | Ceph | For |
+| ------- | ---- | --- |
+| `vm` (RBD) | pool `vm`, 3 replicas, `min_size` 2 | VM disks and container volumes; a node can fail without stopping them |
+| `cephfs` (`/mnt/pve/cephfs`) | `cephfs_data`, 3 replicas | ISO images, templates, backups, snippets |
+| `/mnt/pve/cephfs/media` | `cephfs_media`, erasure coded 2+1 | Movies, series and other large files, at 1.5× instead of 3× the raw space |
+
+The media directory survives one failed node like the replicated pools. With `ceph_media_min_size: 2` (default) it stays writable while a node is down, e.g. during updates; data written meanwhile has no redundancy until the node is back. `3`, Ceph's recommendation, blocks media I/O whenever a node is down instead. Bind-mount the directory into containers (e.g. `mp0: /mnt/pve/cephfs/media,mp=/media`).
+
+On nodes with little memory, OSD memory (`ceph_osd_memory_target`, 3 GiB) and the metadata server cache (`ceph_mds_cache_memory_limit`, 1 GiB) are below Ceph's defaults of 4 GiB each.
 
 ### 🔐 Certificates
 
@@ -163,6 +178,7 @@ Try it against the Let's Encrypt staging directory first (`certificates_acme_dir
 │   ├── cluster/           # Cluster creation and join
 │   ├── thunderbolt/       # Thunderbolt links
 │   ├── fabric/            # Routed mesh (SDN OpenFabric), corosync link, migration
+│   ├── ceph/              # Ceph: VM pool, CephFS, erasure-coded media directory
 │   └── certificates/      # Cluster CA or ACME certificates
 ├── inventory/sample/      # Example inventory
 ├── changelogs/            # antsibull-changelog fragments and history

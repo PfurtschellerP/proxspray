@@ -1,0 +1,41 @@
+---
+# ceph.conf lives in the cluster file system, so all nodes see the same file.
+- name: Check for the Ceph configuration
+  ansible.builtin.stat:
+    path: "{{ ceph_conf }}"
+  register: ceph_conf_stat
+
+- name: Initialise the Ceph configuration
+  ansible.builtin.command:
+    argv:
+      - pveceph
+      - init
+      - --network
+      - "{{ ceph_public_network }}"
+      - --cluster-network
+      - "{{ ceph_cluster_network }}"
+  run_once: true
+  changed_when: true
+  when: not ceph_conf_stat.stat.exists
+
+- name: Read the Ceph configuration
+  ansible.builtin.slurp:
+    src: "{{ ceph_conf }}"
+  register: ceph_conf_content
+  run_once: true
+  when: not ansible_check_mode or ceph_conf_stat.stat.exists
+
+- name: Assert that Ceph uses the configured networks
+  vars:
+    ceph_conf_text: "{{ ceph_conf_content.content | b64decode }}"
+  ansible.builtin.assert:
+    that:
+      - ceph_conf_text is search('public_network\s*=\s*' ~ ceph_public_network | regex_escape ~ '\s')
+      - ceph_conf_text is search('cluster_network\s*=\s*' ~ ceph_cluster_network | regex_escape ~ '\s')
+    fail_msg: >-
+      {{ ceph_conf }} uses other networks than ceph_public_network ({{ ceph_public_network }}) and
+      ceph_cluster_network ({{ ceph_cluster_network }}). Moving an existing cluster to another network is not
+      done by this role; adjust the variables to the current networks.
+    quiet: true
+  run_once: true
+  when: ceph_conf_content is not skipped

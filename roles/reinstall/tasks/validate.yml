@@ -104,3 +104,46 @@
   when:
     - reinstall_remaining_hosts | length > 0
     - reinstall_status | selectattr('type', 'eq', 'cluster') | list | length > 0
+
+- name: Check whether Ceph is configured
+  ansible.builtin.stat:
+    path: /etc/pve/ceph.conf
+  register: reinstall_ceph_conf
+
+# The old OSD disks must come back empty to become OSDs again.
+- name: Assert that the installation wipes the Ceph disks
+  ansible.builtin.assert:
+    that: install_media_wipe_disks | default(false) | bool
+    fail_msg: >-
+      Ceph is configured, so the reinstalled nodes' OSD disks must be wiped. Set install_media_wipe_disks: true,
+      rebuild the media with install_media.yml (the reinstall writes it to the stick) and run again.
+    quiet: true
+  when: reinstall_ceph_conf.stat.exists
+
+- name: Get the Ceph status of the remaining cluster
+  ansible.builtin.command: ceph status --format json
+  delegate_to: "{{ reinstall_remaining_hosts | first | default(inventory_hostname) }}"
+  run_once: true
+  register: reinstall_ceph_status
+  changed_when: false
+  check_mode: false
+  when:
+    - reinstall_remaining_hosts | length > 0
+    - reinstall_ceph_conf.stat.exists
+
+# With data only on the reinstalled node (degraded pools), wiping it loses data.
+- name: Assert that Ceph can lose the reinstalled nodes
+  vars:
+    reinstall_ceph: "{{ reinstall_ceph_status.stdout | from_json }}"
+    reinstall_unclean: "{{ reinstall_ceph.pgmap.pgs_by_state | default([]) | rejectattr('state_name', 'eq', 'active+clean') | list }}"
+  ansible.builtin.assert:
+    that:
+      - reinstall_unclean | length == 0
+      - reinstall_ceph.osdmap.num_up_osds == reinstall_ceph.osdmap.num_osds
+    fail_msg: >-
+      Ceph is not fully redundant ({{ reinstall_ceph.osdmap.num_up_osds }} of {{ reinstall_ceph.osdmap.num_osds }}
+      OSDs up, PGs: {{ reinstall_unclean | map(attribute='state_name') | join(', ') or 'all active+clean' }}).
+      Reinstalling now could lose data; wait until `ceph -s` shows all PGs active+clean.
+    quiet: true
+  run_once: true
+  when: reinstall_ceph_status is not skipped

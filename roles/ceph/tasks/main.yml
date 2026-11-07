@@ -1,0 +1,34 @@
+---
+- name: Validate Ceph configuration
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Install Ceph packages
+  ansible.builtin.import_tasks: packages.yml
+
+- name: Initialise Ceph
+  ansible.builtin.import_tasks: init.yml
+
+- name: Create monitors, managers and OSDs
+  ansible.builtin.import_tasks: daemons.yml
+
+- name: Configure Ceph
+  ansible.builtin.import_tasks: config.yml
+
+- name: Create the VM pool
+  ansible.builtin.import_tasks: vm_pool.yml
+
+- name: Create CephFS
+  ansible.builtin.import_tasks: cephfs.yml
+
+- name: Store the media directory erasure coded
+  ansible.builtin.import_tasks: media.yml
+  when: ceph_media_enabled | bool
+
+- name: Apply pending changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify Ceph
+  ansible.builtin.import_tasks: verify.yml
+  when:
+    - ceph_verify | bool
+    - not ansible_check_mode
