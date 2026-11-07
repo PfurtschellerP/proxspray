@@ -27,6 +27,11 @@
 # update_migrate: true                       # move running guests away and back
 # update_memory_reserve: 2048                # MiB kept free on nodes receiving guests
 
+## Shutdown and startup of the whole cluster (roles/power, shutdown.yml, startup.yml)
+# power_guest_timeout: 180            # seconds per guest to shut down before a hard stop
+# power_poweroff: true                # false: prepare everything, keep the nodes on (e.g. UPS)
+# power_wake_on_lan: true             # startup.yml wakes hosts with node_mac
+
 ## Proxmox VE (roles/proxmox)
 # proxmox_repository: no-subscription        # enterprise | no-subscription | test
 # proxmox_ceph_repository: no-subscription   # enterprise | no-subscription | test | none

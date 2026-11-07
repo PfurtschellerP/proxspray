@@ -49,6 +49,7 @@ An Ansible collection (`pfurtschellerp.proxspray`) that turns three mini PCs int
 | ✅ | Certificates from the cluster CA, optionally ACME (Let's Encrypt) with automatic renewal |
 | ✅ | Ceph (Tentacle) on the Thunderbolt mesh: RBD pool for VM disks, CephFS with an erasure-coded media directory |
 | ✅ | High availability: guests on Ceph are restarted on another node when theirs fails, placement rules, live migration instead of downtime on planned reboots |
+| ✅ | Orderly shutdown and startup of the whole cluster: guests stopped and started again, Ceph flags, HA disarmed so no node fences itself |
 | ✅ | Failed disks: remove the OSD safely, swap the disk, recreate the OSD |
 | ✅ | Notifications to Telegram, ntfy, Gotify, Signal or webhooks, plus a health check for quorum, Ceph and the Thunderbolt links |
 
@@ -112,6 +113,7 @@ The commonly changed settings are listed in [inventory/sample/group_vars/all/all
 | [ceph](roles/ceph/defaults/main.yml) | Ceph monitors, managers, metadata servers, OSDs, pools, CephFS | `ceph_osd_devices`, `ceph_osd_model`, `ceph_media_*`, `ceph_osd_memory_target` |
 | [ha](roles/ha/defaults/main.yml) | HA resources, placement rules, shutdown policy | `ha_resources`, `ha_rules`, `ha_shutdown_policy` |
 | [replace_osd](roles/replace_osd/defaults/main.yml) | Remove failed OSDs so their disks can be swapped (`replace_osd.yml`) | `replace_osd_ids`, `replace_osd_confirm`, `replace_osd_cleanup` |
+| [power](roles/power/defaults/main.yml) | Shut down and start the whole cluster (`shutdown.yml`, `startup.yml`) | `power_confirm`, `power_poweroff`, `power_guest_timeout`, `power_wake_on_lan` |
 | [update](roles/update/defaults/main.yml) | Rolling update of all nodes (`update.yml`) | `update_reboot`, `update_migrate`, `update_memory_reserve` |
 | [certificates](roles/certificates/defaults/main.yml) | Web interface / API certificates | `certificates_mode`, `certificates_acme_*` |
 | [notifications](roles/notifications/defaults/main.yml) | Notification targets and health check | `notifications_targets`, `notifications_severities`, `notifications_healthcheck` |
@@ -220,7 +222,27 @@ ansible-playbook -i inventory/mycluster/inventory.ini update.yml
 
 Finally it clears `noout`. Any failure stops the run before the next node: the node stays in maintenance mode and Ceph keeps `noout`, so nothing moves back onto a broken node. Fix the cause and run `update.yml` again; it continues where it stopped.
 
+### 🔌 Shutting down the whole cluster
+
+Powering off the nodes one by one would let HA migrate the guests onto the remaining nodes, let Ceph start re-replicating and mark OSDs out, and let the last nodes fence themselves when quorum goes away. `shutdown.yml` does it in order:
+
+```bash
+ansible-playbook -i inventory/mycluster/inventory.ini shutdown.yml --check   # show the plan
+ansible-playbook -i inventory/mycluster/inventory.ini shutdown.yml -e power_confirm=node-1,node-2,node-3
+# … power the nodes on again (Wake-on-LAN for hosts with node_mac), then:
+ansible-playbook -i inventory/mycluster/inventory.ini startup.yml
+```
+
+1. Check that the cluster is quorate and no backup or replication is running, and save what is about to change in `/etc/pve/proxspray-shutdown.json`.
+2. Stop all guests through Proxmox VE's "stop all guests" of each node (reverse start order, hard stop after `power_guest_timeout`); HA guests are stopped by HA.
+3. Set the Ceph flags `noout`, `norebalance`, `norecover` and `nobackfill`, so nothing is marked out or moved while the nodes are off and while they come back one after another.
+4. Disarm HA (`freeze`): all watchdogs are released, so no node fences itself, and HA moves or starts nothing until it is re-armed.
+5. Power off all nodes at once.
+
+`startup.yml` waits until the nodes are reachable, quorate and all Ceph monitors and OSDs are up, clears exactly the flags it set, waits for all placement groups to be active, re-arms HA, sets the HA guests back to started, starts the other guests that were running (and those that start at boot) and waits until they run. Both playbooks can be run again after a failure; they continue where they stopped. With `power_poweroff: false`, `shutdown.yml` prepares everything but leaves the nodes running, e.g. for a UPS that cuts the power. After a power outage without `shutdown.yml`, `startup.yml` only starts the guests that start at boot.
+
 ### 🔐 Certificates
+
 
 By default (`certificates_mode: self_signed`) the nodes keep the certificates Proxmox VE issues from the cluster's own CA. The role regenerates them if they are about to expire or don't cover the node's name, and removes custom certificates. Set `certificates_fetch_ca: true` to copy `pve-root-ca.pem` to `<inventory>/artifacts/` and add it to your trust store.
 
@@ -266,6 +288,8 @@ Proxmox VE does not watch everything that matters here, so every node also runs 
 ├── reinstall.yml          # Reinstall nodes from their plugged-in stick
 ├── update.yml             # Rolling update of all nodes
 ├── replace_osd.yml        # Remove failed Ceph OSDs before a disk swap
+├── shutdown.yml           # Orderly shutdown of the whole cluster
+├── startup.yml            # Start the cluster again after shutdown.yml
 ├── playbooks/             # Playbooks, also available as pfurtschellerp.proxspray.<name>
 ├── roles/
 │   ├── install_media/     # Unattended installer ISOs (controller)
@@ -278,6 +302,7 @@ Proxmox VE does not watch everything that matters here, so every node also runs 
 │   ├── ha/                # High availability of guests
 │   ├── replace_osd/       # Safe removal of failed OSDs
 │   ├── update/            # Rolling update with migration and maintenance flags
+│   ├── power/             # Shutdown and startup of the whole cluster
 │   ├── certificates/      # Cluster CA or ACME certificates
 │   └── notifications/     # Notification targets and health check
 ├── inventory/sample/      # Example inventory
