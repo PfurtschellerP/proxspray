@@ -4,6 +4,7 @@ extends: default
 ignore: |
   .ansible/
   changelogs/
+  inventory/lab/
 
 rules:
   # Compatible with ansible-lint

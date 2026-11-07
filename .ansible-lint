@@ -6,6 +6,7 @@ exclude_paths:
   - .devcontainer/
   - .github/
   - changelogs/
+  - inventory/lab/
 
 # Variables of the sample inventory are documented examples, not role variables.
 kinds:

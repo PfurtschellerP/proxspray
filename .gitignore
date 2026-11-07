@@ -6,3 +6,6 @@ inventory/*/artifacts/
 
 # Generated secrets (SSH host keys of the nodes)
 inventory/*/credentials/
+
+# Lab environment for local testing
+inventory/lab/*
