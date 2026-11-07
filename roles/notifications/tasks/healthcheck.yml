@@ -1,0 +1,88 @@
+---
+- name: Install the health check
+  when: notifications_healthcheck | bool
+  block:
+    - name: Create the health check directories
+      ansible.builtin.file:
+        path: "{{ notifications_directory }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      loop: [/etc/proxspray, /var/lib/proxspray]
+      loop_control:
+        loop_var: notifications_directory
+
+    # ansible-test requires `#!/usr/bin/env python` in the source, but Debian
+    # has no `python` command, so the installed script names python3.
+    - name: Install the health check script
+      ansible.builtin.copy:
+        content: "{{ lookup('ansible.builtin.file', 'healthcheck.py') | regex_replace('^#!.*', '#!/usr/bin/python3') }}\n"
+        dest: "{{ notifications_script }}"
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Configure the health check
+      ansible.builtin.copy:
+        content: |
+          {{ {'grace': notifications_healthcheck_grace | int,
+              'ceph_ignore': notifications_healthcheck_ceph_ignore,
+              'thunderbolt_interfaces': notifications_healthcheck_thunderbolt_interfaces,
+              'thunderbolt_min_link_speed': notifications_healthcheck_min_link_speed | float} | to_nice_json }}
+        dest: /etc/proxspray/healthcheck.json
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Install the health check units
+      ansible.builtin.template:
+        src: "{{ notifications_unit }}.j2"
+        dest: /etc/systemd/system/{{ notifications_unit }}
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - proxspray-healthcheck.service
+        - proxspray-healthcheck.timer
+      loop_control:
+        loop_var: notifications_unit
+      register: notifications_units
+
+    # A running timer keeps its old schedule until it is restarted.
+    - name: Enable the health check timer
+      ansible.builtin.systemd_service:
+        name: proxspray-healthcheck.timer
+        enabled: true
+        state: "{{ 'restarted' if notifications_units is changed else 'started' }}"
+        daemon_reload: "{{ notifications_units is changed }}"
+      # In check mode on a new node, the unit is not installed yet.
+      when: not (ansible_check_mode and notifications_units is changed)
+
+- name: Remove the health check
+  when: not notifications_healthcheck | bool
+  block:
+    - name: Check for the health check timer
+      ansible.builtin.stat:
+        path: /etc/systemd/system/proxspray-healthcheck.timer
+      register: notifications_timer
+
+    - name: Disable the health check timer
+      ansible.builtin.systemd_service:
+        name: proxspray-healthcheck.timer
+        enabled: false
+        state: stopped
+      when: notifications_timer.stat.exists
+
+    - name: Remove the health check files
+      ansible.builtin.file:
+        path: "{{ notifications_file }}"
+        state: absent
+      loop:
+        - /etc/systemd/system/proxspray-healthcheck.timer
+        - /etc/systemd/system/proxspray-healthcheck.service
+        - /etc/proxspray/healthcheck.json
+        - /var/lib/proxspray/healthcheck-state.json
+        - "{{ notifications_script }}"
+      loop_control:
+        loop_var: notifications_file

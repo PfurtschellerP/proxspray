@@ -54,3 +54,12 @@
   roles:
     - role: certificates
       tags: certificates
+
+# Last, so the health check finds the finished cluster.
+- name: Configure notifications
+  hosts: all
+  gather_facts: false
+  become: true
+  roles:
+    - role: notifications
+      tags: notifications

@@ -1,0 +1,10 @@
+{{ ansible_managed | comment }}
+[Unit]
+Description=Run the proxspray health check every {{ notifications_healthcheck_interval }}
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec={{ notifications_healthcheck_interval }}
+
+[Install]
+WantedBy=timers.target

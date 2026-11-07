@@ -1,0 +1,84 @@
+---
+# Comment of everything proxspray creates; the hash in it records the
+# configuration, so a changed target is updated and an unchanged one is not
+# (the API does not return secrets to compare).
+notifications_marker: Managed by proxspray
+
+notifications_types: [telegram, ntfy, gotify, signal, webhook]
+notifications_all_severities: [info, notice, warning, error, unknown]
+
+# Proxmox VE (Handlebars) templates, not Jinja, hence !unsafe. `escape`
+# escapes a value for use inside a JSON string.
+notifications_hb_text: !unsafe '{{ escape title }}\n\n{{ escape message }}'
+notifications_hb_title: !unsafe '{{ escape title }}'
+notifications_hb_message: !unsafe '{{ escape message }}'
+notifications_hb_severity: !unsafe '{{ severity }}'
+notifications_hb_secret_token: !unsafe '{{ secrets.token }}'
+notifications_hb_secret_topic: !unsafe '{{ secrets.topic }}'
+
+# Every target as a Proxmox VE endpoint: {name, type (API endpoint type),
+# args (API parameters except name and comment), delete (optional
+# parameters to unset on update), comment}.
+notifications_endpoints: >-
+  {%- set result = [] -%}
+  {%- for t in notifications_targets -%}
+  {%-   set ns = namespace(type='webhook', url='', method='post', body='', headers={}, secrets={}, args=[]) -%}
+  {%-   if t.type == 'gotify' -%}
+  {%-     set ns.type = 'gotify' -%}
+  {%-     set ns.args = ['--server', t.server | string, '--token', t.token | string] -%}
+  {%-   else -%}
+  {%-     if t.type == 'telegram' -%}
+  {%-       set ns.url = 'https://api.telegram.org/bot' ~ notifications_hb_secret_token ~ '/sendMessage' -%}
+  {%-       set ns.secrets = {'token': t.token} -%}
+  {%-       set ns.headers = {'Content-Type': 'application/json'} -%}
+  {%-       set ns.body = '{"chat_id": ' ~ (t.chat_id | string | to_json) ~ ', "text": "' ~ notifications_hb_text ~ '"}' -%}
+  {%-     elif t.type == 'ntfy' -%}
+  {%-       set ns.url = t.server | default('https://ntfy.sh') -%}
+  {%-       set ns.secrets = {'topic': t.topic} | combine({'token': t.token} if t.token | default('') | length > 0 else {}) -%}
+  {%-       set ns.headers = {'Content-Type': 'application/json'}
+                             | combine({'Authorization': 'Bearer ' ~ notifications_hb_secret_token}
+                                       if t.token | default('') | length > 0 else {}) -%}
+  {%-       set ns.body = '{"topic": "' ~ notifications_hb_secret_topic ~ '", "title": "' ~ notifications_hb_title
+                          ~ '", "message": "' ~ notifications_hb_message ~ '", "tags": ["' ~ notifications_hb_severity ~ '"]}' -%}
+  {%-     elif t.type == 'signal' -%}
+  {%-       set ns.url = t.url | regex_replace('/+$', '') ~ '/v2/send' -%}
+  {%-       set ns.headers = {'Content-Type': 'application/json'} -%}
+  {%-       set ns.body = '{"number": ' ~ (t.number | string | to_json) ~ ', "recipients": ' ~ (t.recipients | map('string') | list | to_json)
+                          ~ ', "message": "' ~ notifications_hb_text ~ '"}' -%}
+  {%-     else -%}
+  {%-       set ns.url = t.url -%}
+  {%-       set ns.method = t.method | default('post') | lower -%}
+  {%-       set ns.headers = t.headers | default({}) -%}
+  {%-       set ns.secrets = t.secrets | default({}) -%}
+  {%-       set ns.body = t.body | default('') -%}
+  {%-     endif -%}
+  {%-     set ns.args = ['--url', ns.url, '--method', ns.method] -%}
+  {%-     if ns.body | length > 0 -%}
+  {%-       set ns.args = ns.args + ['--body', ns.body | b64encode] -%}
+  {%-     endif -%}
+  {%-     for key, value in ns.headers | dictsort -%}
+  {%-       set ns.args = ns.args + ['--header', 'name=' ~ key ~ ',value=' ~ (value | string | b64encode)] -%}
+  {%-     endfor -%}
+  {%-     for key, value in ns.secrets | dictsort -%}
+  {%-       set ns.args = ns.args + ['--secret', 'name=' ~ key ~ ',value=' ~ (value | string | b64encode)] -%}
+  {%-     endfor -%}
+  {%-   endif -%}
+  {%-   set delete = [] if ns.type == 'gotify' else
+                     (['body'] if ns.body | length == 0 else [])
+                     + (['header'] if ns.headers | length == 0 else [])
+                     + (['secret'] if ns.secrets | length == 0 else []) -%}
+  {%-   set hash = ([ns.type] + ns.args) | join('\n') | hash('sha256') -%}
+  {%-   set _ = result.append({'name': t.name, 'type': ns.type, 'args': ns.args, 'delete': delete,
+                               'comment': notifications_marker ~ ' (' ~ hash[:12] ~ ')'}) -%}
+  {%- endfor -%}
+  {{ result }}
+
+notifications_matcher_args: >-
+  {{ (['--target'] | product(notifications_targets | map(attribute='name') | sort) | flatten)
+     + (['--match-severity', notifications_severities | join(',')]
+        if notifications_all_severities | reject('in', notifications_severities) | list | length > 0 else [])
+     + ['--mode', 'all'] }}
+notifications_matcher_comment: >-
+  {{ notifications_marker }} ({{ (notifications_matcher_args | join('\n') | hash('sha256'))[:12] }})
+
+notifications_script: /usr/local/sbin/proxspray-healthcheck
