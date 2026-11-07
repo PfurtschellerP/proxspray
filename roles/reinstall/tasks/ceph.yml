@@ -1,0 +1,84 @@
+---
+# The remaining cluster forgets the reinstalled nodes' Ceph daemons, so that
+# setup.yml can create them again under the same names. pveceph can only
+# destroy daemons on their own node, which has been wiped.
+
+- name: Remove the Ceph daemons of the reinstalled nodes
+  delegate_to: "{{ reinstall_remaining_hosts | first | default(inventory_hostname) }}"
+  run_once: true
+  when:
+    - reinstall_remaining_hosts | length > 0
+    - reinstall_ceph_status is not skipped
+    - not ansible_check_mode
+  vars:
+    reinstall_leaving: "{{ ansible_play_hosts_all | map('extract', hostvars, 'reinstall_pve_node') | list }}"
+  block:
+    - name: Read the Ceph monitors
+      ansible.builtin.command: ceph mon dump --format json
+      register: reinstall_ceph_mons
+      changed_when: false
+
+    - name: Remove the monitors of the reinstalled nodes
+      ansible.builtin.command:
+        argv: [ceph, mon, remove, "{{ reinstall_ceph_mon }}"]
+      loop: "{{ (reinstall_ceph_mons.stdout | from_json).mons | map(attribute='name') | select('in', reinstall_leaving) | list }}"
+      loop_control:
+        loop_var: reinstall_ceph_mon
+      changed_when: true
+
+    - name: Remove the reinstalled nodes from ceph.conf
+      ansible.builtin.script:
+        cmd: ceph_forget_node.py --node {{ reinstall_ceph_node | quote }}
+        executable: /usr/bin/python3
+      loop: "{{ reinstall_leaving }}"
+      loop_control:
+        loop_var: reinstall_ceph_node
+      register: reinstall_ceph_conf_edit
+      changed_when: (reinstall_ceph_conf_edit.stdout | from_json).changed
+
+    - name: Read the OSD tree
+      ansible.builtin.command: ceph osd tree --format json
+      register: reinstall_ceph_tree
+      changed_when: false
+
+    - name: Purge the OSDs of the reinstalled nodes
+      vars:
+        reinstall_hosts: >-
+          {{ (reinstall_ceph_tree.stdout | from_json).nodes | selectattr('type', 'eq', 'host')
+             | selectattr('name', 'in', reinstall_leaving) | list }}
+      ansible.builtin.command:
+        argv: [ceph, osd, purge, "{{ reinstall_ceph_osd | string }}", --yes-i-really-mean-it]
+      loop: "{{ reinstall_hosts | map(attribute='children') | flatten }}"
+      loop_control:
+        loop_var: reinstall_ceph_osd
+      changed_when: true
+
+    - name: Remove the hosts of the reinstalled nodes from the CRUSH map
+      ansible.builtin.command:
+        argv: [ceph, osd, crush, remove, "{{ reinstall_ceph_host }}"]
+      loop: >-
+        {{ (reinstall_ceph_tree.stdout | from_json).nodes | selectattr('type', 'eq', 'host')
+           | map(attribute='name') | select('in', reinstall_leaving) | list }}
+      loop_control:
+        loop_var: reinstall_ceph_host
+      changed_when: true
+
+    - name: Read the Ceph keys
+      ansible.builtin.command: ceph auth ls --format json
+      register: reinstall_ceph_auth
+      changed_when: false
+      no_log: true
+
+    - name: Remove the manager and metadata server keys of the reinstalled nodes
+      vars:
+        reinstall_entities: >-
+          {{ reinstall_leaving | map('regex_replace', '^', 'mgr.') | list
+             + reinstall_leaving | map('regex_replace', '^', 'mds.') | list }}
+      ansible.builtin.command:
+        argv: [ceph, auth, rm, "{{ reinstall_ceph_entity }}"]
+      loop: >-
+        {{ (reinstall_ceph_auth.stdout | from_json).auth_dump | map(attribute='entity')
+           | select('in', reinstall_entities) | list }}
+      loop_control:
+        loop_var: reinstall_ceph_entity
+      changed_when: true
