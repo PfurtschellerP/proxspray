@@ -102,7 +102,7 @@ jobs:
           - stable-2.21
           - devel
     steps:
-      - uses: ansible-community/ansible-test-gh-action@release/v1
+      - uses: ansible-community/ansible-test-gh-action@6ded727edb598e670ac056a8e680ca4050bac0a3 # release/v1
         with:
           ansible-core-version: ${{ matrix.ansible }}
           testing-type: sanity
