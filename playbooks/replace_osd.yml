@@ -1,0 +1,21 @@
+---
+# Removes failed Ceph OSDs so their disks can be swapped, e.g.
+#   ansible-playbook replace_osd.yml -e replace_osd_ids=3 -e replace_osd_confirm=osd.3
+# then, with the new disk in place:
+#   ansible-playbook setup.yml --tags ceph
+
+- name: Check Ansible version
+  ansible.builtin.import_playbook: ansible_version.yml
+
+- name: Gather facts
+  ansible.builtin.import_playbook: facts.yml
+
+# A failed check on any node stops the others before an OSD is touched.
+- name: Remove Ceph OSDs
+  hosts: all
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  roles:
+    - role: replace_osd
+      tags: replace_osd

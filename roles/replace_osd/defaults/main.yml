@@ -1,0 +1,22 @@
+---
+# Removes failed or failing OSDs from Ceph so their disks can be swapped
+# (replace_osd.yml). After the swap, `setup.yml --tags ceph` turns the new,
+# empty disk into an OSD (ceph_osd_devices: auto) or the listed disk.
+
+# IDs of the OSDs to remove, as a list or comma-separated, e.g. [3] or "3,5"
+# (`ceph osd tree` shows them per node).
+replace_osd_ids: []
+
+# Comma-separated, sorted OSD names, as a safeguard against removing the wrong
+# OSD; the validation prints the exact value to pass, e.g.
+# `-e replace_osd_confirm=osd.3`.
+replace_osd_confirm: ""
+
+# Wipe the OSD's disk when removing it (pveceph osd destroy --cleanup): auto
+# wipes it when the OSD is still running (the disk works and might be reused),
+# true always, false never. A dead disk cannot be wiped.
+replace_osd_cleanup: auto
+
+# Wait until the OSDs are gone and all placement groups are active again.
+replace_osd_verify: true
+replace_osd_timeout: 600

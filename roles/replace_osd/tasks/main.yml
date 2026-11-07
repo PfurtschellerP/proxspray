@@ -1,0 +1,12 @@
+---
+- name: Validate the OSD replacement
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Remove the OSDs
+  ansible.builtin.import_tasks: remove.yml
+
+- name: Verify the removal
+  ansible.builtin.import_tasks: verify.yml
+  when:
+    - replace_osd_verify | bool
+    - not ansible_check_mode
