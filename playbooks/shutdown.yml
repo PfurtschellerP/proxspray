@@ -1,0 +1,19 @@
+---
+# Orderly shutdown of the whole cluster: `ansible-playbook shutdown.yml
+# -e power_confirm=<all hosts>` (or pfurtschellerp.proxspray.shutdown). Add
+# --check to see the plan. startup.yml brings the cluster back.
+
+- name: Check Ansible version
+  ansible.builtin.import_playbook: ansible_version.yml
+
+- name: Gather facts
+  ansible.builtin.import_playbook: facts.yml
+
+- name: Shut down the cluster
+  hosts: all
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  roles:
+    - role: power
+      tags: power

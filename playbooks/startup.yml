@@ -1,0 +1,33 @@
+---
+# Start the cluster after shutdown.yml (or after a power outage):
+# `ansible-playbook startup.yml` (or pfurtschellerp.proxspray.startup).
+
+- name: Check Ansible version
+  ansible.builtin.import_playbook: ansible_version.yml
+
+# Before facts: the nodes may still be booting or off.
+- name: Wake the nodes and wait for them
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Wake the node and wait for it
+      ansible.builtin.import_role:
+        name: power
+        tasks_from: wake.yml
+      tags: power
+
+- name: Gather facts
+  ansible.builtin.import_playbook: facts.yml
+
+- name: Start the cluster
+  hosts: all
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Clear the Ceph flags, re-arm HA and start the guests
+      ansible.builtin.import_role:
+        name: power
+        tasks_from: startup.yml
+      tags: power

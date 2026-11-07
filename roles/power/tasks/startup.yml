@@ -1,0 +1,186 @@
+---
+# startup.yml, after the nodes are up: undo what shutdown.yml changed (see
+# power_state_file), in reverse order.
+
+- name: Assert that all hosts are in the run
+  ansible.builtin.assert:
+    that: ansible_play_hosts_all | sort == groups['all'] | sort
+    fail_msg: >-
+      startup.yml starts the whole cluster, so it runs on all hosts ({{ power_hosts }}; this run has
+      {{ ansible_play_hosts_all | sort | join(',') }}).
+    quiet: true
+  run_once: true
+
+- name: Wait for quorum and all nodes online
+  ansible.builtin.command: pvesh get /cluster/status --output-format json
+  register: power_cluster_status
+  changed_when: false
+  check_mode: false
+  until: >-
+    power_cluster_status.rc == 0
+    and (power_cluster_status.stdout | from_json | selectattr('type', 'eq', 'cluster') | first | default({})).quorate
+        | default(0) | int == 1
+    and power_cluster_status.stdout | from_json | selectattr('type', 'eq', 'node') | rejectattr('online')
+        | list | length == 0
+  retries: "{{ power_health_retries }}"
+  delay: 10
+  run_once: true
+
+- name: Check for the state of the shutdown
+  ansible.builtin.stat:
+    path: "{{ power_state_file }}"
+  register: power_state_stat
+  run_once: true
+
+- name: Read the state of the shutdown
+  ansible.builtin.slurp:
+    path: "{{ power_state_file }}"
+  register: power_state_raw
+  run_once: true
+  when: power_state_stat.stat.exists
+
+# Without it (nodes switched off another way), only start-at-boot guests
+# are started and nothing else is changed.
+- name: Note the state of the shutdown
+  ansible.builtin.set_fact:
+    power_state: "{{ power_state_raw.content | default('e30=') | b64decode | from_json }}"
+  run_once: true
+
+- name: Check for Ceph
+  ansible.builtin.stat:
+    path: /etc/pve/ceph.conf
+  register: power_ceph_conf
+  run_once: true
+
+- name: Wait for all Ceph monitors and OSDs
+  ansible.builtin.command: ceph status --format json
+  register: power_ceph_status
+  changed_when: false
+  check_mode: false
+  vars:
+    power_ceph: "{{ power_ceph_status.stdout | default('{}', true) | from_json }}"
+  until: >-
+    power_ceph_status.rc == 0
+    and power_ceph.quorum_names | default([]) | length == power_ceph.monmap.num_mons | default(-1)
+    and power_ceph.osdmap.num_up_osds | default(-1) == power_ceph.osdmap.num_osds | default(0)
+  retries: "{{ power_health_retries }}"
+  delay: 10
+  run_once: true
+  when: power_ceph_conf.stat.exists
+
+- name: Clear the Ceph flags
+  ansible.builtin.command:
+    argv: [ceph, osd, unset, "{{ power_flag }}"]
+  loop: "{{ power_state.ceph_flags | default([]) | reverse | list }}"
+  loop_control:
+    loop_var: power_flag
+  changed_when: true
+  run_once: true
+  when: power_ceph_conf.stat.exists
+
+- name: Wait until all placement groups are active
+  ansible.builtin.command: ceph status --format json
+  register: power_pg_status
+  changed_when: false
+  check_mode: false
+  vars:
+    power_pg_states: "{{ (power_pg_status.stdout | default('{}', true) | from_json).pgmap.pgs_by_state | default([]) }}"
+  until: >-
+    power_pg_status.rc == 0
+    and power_pg_states | rejectattr('state_name', 'search', '(^|\+)active(\+|$)') | list | length == 0
+    and power_pg_states | selectattr('state_name', 'search', '(^|\+)(' ~ power_inactive_states | join('|') ~ ')(\+|$)')
+        | list | length == 0
+  retries: "{{ power_health_retries }}"
+  delay: 10
+  run_once: true
+  when: power_ceph_conf.stat.exists
+
+- name: Read the HA resources and status
+  ansible.builtin.command: pvesh get /cluster/ha/{{ power_ha_path }} --output-format json
+  loop: [resources, status/current]
+  loop_control:
+    loop_var: power_ha_path
+  register: power_ha
+  changed_when: false
+  check_mode: false
+  run_once: true
+
+- name: Re-arm HA
+  ansible.builtin.command: ha-manager crm-command arm-ha
+  changed_when: true
+  run_once: true
+  when:
+    - power_state.ha_disarmed | default(false) | bool
+    - power_ha.results[1].stdout | from_json | selectattr('type', 'eq', 'fencing')
+      | map(attribute='armed-state') | first | default('') in ['disarmed', 'disarming']
+
+- name: Wait until HA is armed
+  ansible.builtin.command: pvesh get /cluster/ha/status/current --output-format json
+  register: power_ha_now
+  changed_when: false
+  until: >-
+    power_ha_now.rc == 0
+    and power_ha_now.stdout | from_json | selectattr('type', 'eq', 'fencing')
+        | map(attribute='armed-state') | first | default('') not in ['disarmed', 'disarming']
+  retries: 30
+  delay: 5
+  run_once: true
+  when:
+    - power_state.ha_disarmed | default(false) | bool
+    - not ansible_check_mode
+
+# Stopping them in shutdown.yml set their HA state to stopped.
+- name: Start the HA guests again
+  ansible.builtin.command:
+    argv: [pvesh, set, "/cluster/ha/resources/{{ power_sid }}", --state, started]
+  loop: >-
+    {{ power_ha.results[0].stdout | from_json | selectattr('sid', 'in', power_state.ha_started | default([]))
+       | selectattr('state', 'eq', 'stopped') | map(attribute='sid') | list }}
+  loop_control:
+    loop_var: power_sid
+  changed_when: true
+  run_once: true
+  when: power_restore_guests | bool
+
+- name: List the guests of the cluster
+  ansible.builtin.command: pvesh get /cluster/resources --type vm --output-format json
+  register: power_guests
+  changed_when: false
+  check_mode: false
+  run_once: true
+
+# Explicit VMIDs make startall include HA guests, so only the others; it
+# starts them in start order and skips running ones.
+- name: Start the other guests that were running
+  vars:
+    power_ha_sids: "{{ power_ha.results[0].stdout | from_json | map(attribute='sid') | list }}"
+    power_mine: >-
+      {{ power_guests.stdout | from_json | selectattr('node', 'eq', power_node)
+         | selectattr('vmid', 'in', power_state.guests | default([]) | map(attribute='vmid') | list)
+         | rejectattr('id', 'in', power_ha_sids | map('regex_replace', '^vm:', 'qemu/') | map('regex_replace', '^ct:', 'lxc/'))
+         | map(attribute='vmid') | map('string') | list }}
+  ansible.builtin.command:
+    argv: [pvesh, create, "/nodes/{{ power_node }}/startall", --force, "1", --vms, "{{ power_mine | join(',') }}"]
+  changed_when: true
+  when:
+    - power_restore_guests | bool
+    - power_mine | length > 0
+
+# Proxmox VE tried them at boot, possibly before Ceph was ready; startall
+# skips running guests, and its task does not tell whether it started any.
+- name: Start the guests with start at boot
+  ansible.builtin.command:
+    argv: [pvesh, create, "/nodes/{{ power_node }}/startall"]
+  changed_when: false
+
+- name: Verify the startup
+  ansible.builtin.import_tasks: startup_verify.yml
+  when:
+    - power_verify | bool
+    - not ansible_check_mode
+
+- name: Remove the state of the shutdown
+  ansible.builtin.file:
+    path: "{{ power_state_file }}"
+    state: absent
+  run_once: true

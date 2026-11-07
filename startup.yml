@@ -1,0 +1,3 @@
+---
+- name: Start the cluster
+  ansible.builtin.import_playbook: playbooks/startup.yml

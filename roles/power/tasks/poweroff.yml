@@ -1,0 +1,24 @@
+---
+# Delayed, so the task returns before the connection goes away; all nodes at
+# once, so corosync and Ceph lose their peers together.
+- name: Power off the node
+  ansible.builtin.command: systemd-run --on-active=10 --timer-property=AccuracySec=1s systemctl poweroff
+  changed_when: true
+
+- name: Wait until the node is off
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host | default(inventory_hostname) }}"
+    port: "{{ ansible_port | default(22) | int }}"
+    state: stopped
+    timeout: 600
+  delegate_to: localhost
+  become: false
+  when: not ansible_check_mode
+
+- name: Show how to start the cluster again
+  ansible.builtin.debug:
+    msg: >-
+      All nodes are off. Power them on (startup.yml sends Wake-on-LAN to hosts with node_mac), then run
+      `ansible-playbook -i <inventory> startup.yml` to clear the Ceph flags, re-arm HA and start the guests.
+  run_once: true
+  when: not ansible_check_mode

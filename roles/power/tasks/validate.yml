@@ -1,0 +1,161 @@
+---
+- name: Validate power settings
+  ansible.builtin.assert:
+    that:
+      - power_poweroff | bool in [true, false]
+      - power_guest_timeout | int >= 0
+      - power_stop_timeout | int > 0
+      - ansible_play_hosts_all | sort == groups['all'] | sort
+    fail_msg: >-
+      shutdown.yml shuts down the whole cluster, so it runs on all hosts ({{ power_hosts }}; this run has
+      {{ ansible_play_hosts_all | sort | join(',') }}). To take down one node, reboot it or use update.yml; the
+      timeouts must be numbers of seconds.
+    quiet: true
+  run_once: true
+
+- name: Read the cluster status
+  ansible.builtin.command: pvesh get /cluster/status --output-format json
+  register: power_cluster_status
+  changed_when: false
+  check_mode: false
+  run_once: true
+
+# Without quorum /etc/pve is read-only: HA cannot stop its guests and the
+# state for startup.yml cannot be written.
+- name: Assert that the cluster is quorate
+  vars:
+    power_cluster: "{{ power_cluster_status.stdout | from_json | selectattr('type', 'eq', 'cluster') | first | default({}) }}"
+  ansible.builtin.assert:
+    that: power_cluster.quorate | default(0) | int == 1
+    fail_msg: >-
+      The cluster is not quorate (pvecm status), so the shutdown cannot be prepared. Bring the missing nodes back,
+      or shut the remaining nodes down by hand.
+    quiet: true
+  run_once: true
+
+- name: List the running tasks of this node
+  ansible.builtin.command: pvesh get /nodes/{{ power_node }}/tasks --source active --output-format json
+  register: power_active_tasks
+  changed_when: false
+  check_mode: false
+
+# A backup or replication would be cut off.
+- name: Assert that no backup or replication is running
+  vars:
+    power_blocking: "{{ power_active_tasks.stdout | from_json | selectattr('type', 'in', ['vzdump', 'replication']) | list }}"
+  ansible.builtin.assert:
+    that: power_blocking | length == 0
+    fail_msg: >-
+      {{ power_node }} is running {{ power_blocking | map(attribute='type') | join(', ') }}
+      ({{ power_blocking | map(attribute='upid') | join(', ') }}); shut down when it is done.
+    quiet: true
+
+- name: List the guests of the cluster
+  ansible.builtin.command: pvesh get /cluster/resources --type vm --output-format json
+  register: power_guests
+  changed_when: false
+  check_mode: false
+  run_once: true
+
+- name: Read the HA resources and status
+  ansible.builtin.command: pvesh get /cluster/ha/{{ power_ha_path }} --output-format json
+  loop: [resources, status/current]
+  loop_control:
+    loop_var: power_ha_path
+  register: power_ha
+  changed_when: false
+  check_mode: false
+  run_once: true
+
+- name: Check for Ceph
+  ansible.builtin.stat:
+    path: /etc/pve/ceph.conf
+  register: power_ceph_conf
+  run_once: true
+
+- name: Read the Ceph flags
+  ansible.builtin.command: ceph osd dump --format json
+  register: power_osd_dump
+  changed_when: false
+  check_mode: false
+  run_once: true
+  when: power_ceph_conf.stat.exists
+
+- name: Check for the state of an unfinished shutdown
+  ansible.builtin.stat:
+    path: "{{ power_state_file }}"
+  register: power_state_stat
+  run_once: true
+
+- name: Read the state of an unfinished shutdown
+  ansible.builtin.slurp:
+    path: "{{ power_state_file }}"
+  register: power_state_old
+  run_once: true
+  when: power_state_stat.stat.exists
+
+# A repeated run (e.g. after a failure) must not forget what the first run
+# stopped or set, so the old state is merged in.
+- name: Plan the shutdown
+  vars:
+    power_old: "{{ power_state_old.content | default('e30=') | b64decode | from_json }}"
+    power_ha_sids: "{{ power_ha.results[0].stdout | from_json | map(attribute='sid') | list }}"
+    power_running: >-
+      {%- set result = [] -%}
+      {%- for g in power_guests.stdout | from_json | selectattr('status', 'eq', 'running') | sort(attribute='vmid') -%}
+      {%-   set sid = ('vm:' if g.type == 'qemu' else 'ct:') ~ g.vmid -%}
+      {%-   set _ = result.append({'vmid': g.vmid, 'type': g.type, 'name': g.name | default(''), 'node': g.node,
+                                   'sid': sid, 'ha': sid in power_ha_sids}) -%}
+      {%- endfor -%}
+      {{ result }}
+    power_flags_now: "{{ (power_osd_dump.stdout | default('{}', true) | from_json).flags | default('') | split(',') }}"
+    power_armed: >-
+      {{ power_ha.results[1].stdout | from_json | selectattr('type', 'eq', 'fencing')
+         | map(attribute='armed-state') | first | default('') }}
+  ansible.builtin.set_fact:
+    power_state:
+      shutdown_at: "{{ power_old.shutdown_at | default(power_old.started | default(now(utc=true).isoformat() ~ 'Z')) }}"
+      guests: >-
+        {{ power_old.guests | default([])
+           + power_running | rejectattr('sid', 'in', power_old.guests | default([]) | map(attribute='sid')) | list }}
+      ha_started: >-
+        {{ (power_old.ha_started | default([])
+            + power_ha.results[0].stdout | from_json | selectattr('state', 'in', ['started', 'enabled'])
+              | map(attribute='sid') | list) | unique | sort }}
+      ceph_flags: >-
+        {{ (power_old.ceph_flags | default([])
+            + (power_ceph_flags | reject('in', power_flags_now) | list if power_ceph_conf.stat.exists else []))
+           | unique }}
+      ha_disarmed: "{{ power_old.ha_disarmed | default(power_armed not in ['disarmed', 'disarming']) }}"
+  run_once: true
+
+- name: Show the plan
+  ansible.builtin.debug:
+    msg: >-
+      Stop {{ power_state.guests | length }} guest(s){% if power_state.guests %}
+      ({{ power_state.guests | map(attribute='sid') | join(', ') }}){% endif %}, set the Ceph flags
+      {{ power_state.ceph_flags | join(', ') or '(already set or no Ceph)' }}, disarm HA, then
+      {{ 'power off' if power_poweroff | bool else 'keep running' }} {{ power_hosts }}.
+      startup.yml starts them again.{{ ' Continues an unfinished shutdown.' if power_state_stat.stat.exists else '' }}
+  run_once: true
+
+- name: Assert that the shutdown is confirmed
+  ansible.builtin.assert:
+    that: power_confirm | string == power_hosts
+    fail_msg: >-
+      This stops every guest and {{ 'powers off' if power_poweroff | bool else 'prepares' }} every node. To go
+      ahead, run again with -e power_confirm={{ power_hosts }} (got '{{ power_confirm }}').
+    quiet: true
+  run_once: true
+  when: not ansible_check_mode
+
+# Written before anything changes, so startup.yml can undo a failed run too.
+# With tee: pmxcfs (/etc/pve) rejects the temporary files and permission
+# changes of the copy module; it sets owner and mode itself.
+- name: Save the state for startup.yml
+  ansible.builtin.command:
+    argv: [tee, "{{ power_state_file }}"]
+    stdin: "{{ power_state | to_nice_json }}"
+  changed_when: true
+  run_once: true
+  when: (power_state_old.content | default('') | b64decode | trim) != (power_state | to_nice_json | trim)

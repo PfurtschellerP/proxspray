@@ -1,0 +1,35 @@
+---
+# Shutdown and startup of the whole cluster (shutdown.yml, startup.yml). For
+# one node, reboot it or use update.yml instead: the others keep running.
+
+# Comma-separated, sorted names of all hosts, as a safeguard: shutdown.yml
+# stops every guest and powers off every node. The plan shows the exact value
+# to pass, e.g. `-e power_confirm=node-1,node-2,node-3`. Not needed with --check.
+power_confirm: ""
+
+# Power off the nodes at the end. false: stop the guests, set the Ceph flags
+# and disarm HA, but keep the nodes running, e.g. to switch them off by hand
+# or with a UPS. startup.yml undoes the preparation either way.
+power_poweroff: true
+
+# Seconds each guest gets to shut down before it is stopped hard (timeout of
+# Proxmox VE's "stop all guests").
+power_guest_timeout: 180
+# Seconds to wait until all guests are stopped.
+power_stop_timeout: 900
+
+# startup.yml: send a Wake-on-LAN packet from the controller to every host
+# with node_mac. Needs Wake-on-LAN enabled in the firmware and the controller
+# in the nodes' network; without it, power the nodes on by hand.
+power_wake_on_lan: true
+# Seconds to wait for the nodes to boot, and for quorum, Ceph and the guests.
+power_boot_timeout: 1200
+power_health_timeout: 900
+
+# startup.yml: start the guests that were running before shutdown.yml again
+# (HA guests are set back to started). Guests with "start at boot" are started
+# either way.
+power_restore_guests: true
+
+# startup.yml: wait until those guests run (skipped in check mode).
+power_verify: true

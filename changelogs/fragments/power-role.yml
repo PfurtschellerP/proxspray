@@ -1,0 +1,3 @@
+---
+major_changes:
+  - power - new role with the ``shutdown.yml`` and ``startup.yml`` playbooks for an orderly shutdown and startup of the whole cluster. ``shutdown.yml`` stops all guests, sets the Ceph flags ``noout``, ``norebalance``, ``norecover`` and ``nobackfill``, disarms HA so that no node fences itself and powers off all nodes, guarded by ``power_confirm``. ``startup.yml`` wakes the nodes (Wake-on-LAN for hosts with ``node_mac``), waits for quorum and Ceph, clears the flags, re-arms HA and starts the guests that were running. Both can be run again after a failure.
