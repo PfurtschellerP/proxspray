@@ -36,3 +36,46 @@
   loop_control:
     loop_var: thunderbolt_result
     label: "{{ thunderbolt_result.thunderbolt_interface }}"
+
+# The netdev's parent is the Thunderbolt service, whose parent is the connected
+# host (XDomain); that one reports the negotiated speed and lanes.
+- name: Read the Thunderbolt link speed
+  ansible.builtin.slurp:
+    src: /sys/class/net/{{ thunderbolt_attribute[0] }}/device/../{{ thunderbolt_attribute[1] }}
+  loop: "{{ thunderbolt_devices.keys() | sort | product(['rx_speed', 'rx_lanes', 'tx_speed', 'tx_lanes']) | list }}"
+  loop_control:
+    loop_var: thunderbolt_attribute
+    label: "{{ thunderbolt_attribute | join(' ') }}"
+  register: thunderbolt_speed_attributes
+  failed_when: false
+  when: thunderbolt_min_link_speed | float > 0
+
+- name: Assert that the Thunderbolt links run at full speed
+  vars:
+    thunderbolt_values: >-
+      {{ thunderbolt_speed_attributes.results
+         | selectattr('thunderbolt_attribute.0', 'eq', thunderbolt_interface)
+         | map(attribute='content', default='')
+         | map('b64decode') | map('trim') | list }}
+    # [rx_speed, rx_lanes, tx_speed, tx_lanes], e.g. ['20.0 Gb/s', '2', '20.0 Gb/s', '2']
+    thunderbolt_rx: "{{ (thunderbolt_values[0] | default('0', true)).split() | first | float * thunderbolt_values[1] | default(0) | int }}"
+    thunderbolt_tx: "{{ (thunderbolt_values[2] | default('0', true)).split() | first | float * thunderbolt_values[3] | default(0) | int }}"
+  ansible.builtin.assert:
+    that:
+      - thunderbolt_values | select | list | length == 4
+      - thunderbolt_rx | float >= thunderbolt_min_link_speed | float
+      - thunderbolt_tx | float >= thunderbolt_min_link_speed | float
+    fail_msg: >-
+      {% if thunderbolt_values | select | list | length < 4 %}The kernel reports no link speed for
+      {{ thunderbolt_interface }} (/sys/class/net/{{ thunderbolt_interface }}/device/../rx_speed); set
+      thunderbolt_min_link_speed: 0 to skip this check.
+      {% else %}{{ thunderbolt_interface }} runs at {{ thunderbolt_rx | float }} Gb/s receiving
+      ({{ thunderbolt_values[1] }} x {{ thunderbolt_values[0] }}) and {{ thunderbolt_tx | float }} Gb/s sending
+      ({{ thunderbolt_values[3] }} x {{ thunderbolt_values[2] }}), below {{ thunderbolt_min_link_speed }} Gb/s.
+      Use a certified Thunderbolt 4 / USB4 40 Gb/s cable, reseat it and check both ports
+      (`dmesg | grep -i thunderbolt`).{% endif %}
+    quiet: true
+  loop: "{{ thunderbolt_devices.keys() | sort }}"
+  loop_control:
+    loop_var: thunderbolt_interface
+  when: thunderbolt_min_link_speed | float > 0

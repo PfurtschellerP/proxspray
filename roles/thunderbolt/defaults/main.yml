@@ -17,3 +17,9 @@ thunderbolt_mtu: 65520
 thunderbolt_verify: true
 # Seconds to wait for the interfaces to come up.
 thunderbolt_verify_timeout: 60
+# Minimum link speed in Gb/s per direction (speed per lane x lanes, as the
+# kernel reports it for the connected host). Thunderbolt 4 host-to-host links
+# bond two 20 Gb/s lanes to 40 Gb/s; a poor or non-Thunderbolt cable falls
+# back to fewer lanes or a lower speed, which still works but slows Ceph.
+# 0 disables the check, e.g. for kernels that report no link speed.
+thunderbolt_min_link_speed: 40

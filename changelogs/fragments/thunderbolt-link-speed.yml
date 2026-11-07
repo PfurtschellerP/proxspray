@@ -1,0 +1,4 @@
+---
+minor_changes:
+  - thunderbolt - check that every link runs at the expected speed (lanes x speed per lane, ``thunderbolt_min_link_speed``, 40 Gb/s by default), to find cables that fall back to a lower speed.
+  - fabric - detect a failed link after 3 seconds by default instead of the 10 seconds of Proxmox VE (``fabric_hello_multiplier`` 3).
