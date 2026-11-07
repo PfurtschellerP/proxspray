@@ -105,7 +105,11 @@ jobs:
 
   changelog:
     name: Changelog fragment
-    if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'skip-changelog')
+    # Release pull requests (release/*) remove the fragments instead of adding one.
+    if: >-
+      github.event_name == 'pull_request'
+      && !contains(github.event.pull_request.labels.*.name, 'skip-changelog')
+      && !startsWith(github.head_ref, 'release/')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5

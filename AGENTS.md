@@ -135,7 +135,7 @@ formatting. This file only lists what the linters don't check.
 
 ## Checks
 
-Run before considering a change done:
+Run before considering a change done (`just check` runs them all):
 
 ```bash
 ansible-lint                     # production profile

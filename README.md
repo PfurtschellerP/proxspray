@@ -189,15 +189,18 @@ Try it against the Let's Encrypt staging directory first (`certificates_acme_dir
 
 Every change needs a changelog fragment in `changelogs/fragments/` (see the [antsibull-changelog docs](https://ansible.readthedocs.io/projects/antsibull-changelog/changelogs/)). CI runs `yamllint`, `ansible-lint`, `antsibull-changelog lint`, `ansible-test sanity` and syntax checks from a checkout and from the built collection.
 
-To release, bump `version` in `galaxy.yml`, then:
+`just check` runs the same checks locally.
+
+Releasing takes two steps on an up-to-date `main` ([scripts/release.sh](scripts/release.sh)):
 
 ```bash
-antsibull-changelog release      # collects the fragments into CHANGELOG.md
-git commit -am "chore: release X.Y.Z" && git tag vX.Y.Z && git push --follow-tags
+just release-prepare 1.1.0 "Optional summary shown at the top of the release notes"
+# → branch release/v1.1.0: version set in galaxy.yml, all fragments collected into
+#   changelogs/changelog.yaml and CHANGELOG.md and deleted, pushed. Open the PR and merge it.
+
+git switch main && git pull
+just release-tag
+# → tags v1.1.0 and pushes the tag
 ```
 
-The tag triggers the release workflow, which publishes to Ansible Galaxy (secret `GALAXY_API_KEY` in the `release` environment) and creates a GitHub release.
-
-## 📄 License
-
-[GPL-3.0](LICENSE) © Patrick Pfurtscheller
+The tag triggers the release workflow, which checks that it matches `galaxy.yml`, takes the release notes from `changelogs/changelog.yaml`, publishes to Ansible Galaxy (secret `GALAXY_API_KEY` in the `release` environment) and creates a GitHub release. Release pull requests (`release/*`) need no changelog fragment.
