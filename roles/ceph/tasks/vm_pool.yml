@@ -1,0 +1,83 @@
+---
+- name: List the Ceph pools
+  ansible.builtin.command: ceph osd pool ls detail --format json
+  register: ceph_pools
+  changed_when: false
+  check_mode: false
+  run_once: true
+  when: not ansible_check_mode or ceph_conf_stat.stat.exists
+
+- name: Note the current VM pool
+  ansible.builtin.set_fact:
+    ceph_vm_pool_current: >-
+      {{ ceph_pools.stdout | default('[]') | from_json | selectattr('pool_name', 'eq', ceph_vm_pool) | first | default({}) }}
+
+# Also adds the RBD storage of the same name for VM disks and container volumes.
+- name: Create the VM pool
+  ansible.builtin.command:
+    argv:
+      - pveceph
+      - pool
+      - create
+      - "{{ ceph_vm_pool }}"
+      - --size
+      - "{{ ceph_vm_pool_size | string }}"
+      - --min_size
+      - "{{ ceph_vm_pool_min_size | string }}"
+      - --application
+      - rbd
+      - --pg_autoscale_mode
+      - "on"
+      - --target_size_ratio
+      - "{{ ceph_vm_pool_target_size_ratio | string }}"
+      - --add_storages
+      - "1"
+  run_once: true
+  changed_when: true
+  when: ceph_vm_pool_current | length == 0
+
+- name: Update the VM pool
+  ansible.builtin.command:
+    argv:
+      - pveceph
+      - pool
+      - set
+      - "{{ ceph_vm_pool }}"
+      - --size
+      - "{{ ceph_vm_pool_size | string }}"
+      - --min_size
+      - "{{ ceph_vm_pool_min_size | string }}"
+      - --target_size_ratio
+      - "{{ ceph_vm_pool_target_size_ratio | string }}"
+  run_once: true
+  changed_when: true
+  when:
+    - ceph_vm_pool_current | length > 0
+    - >-
+      ceph_vm_pool_current.size | int != ceph_vm_pool_size | int
+      or ceph_vm_pool_current.min_size | int != ceph_vm_pool_min_size | int
+      or ceph_vm_pool_current.options.target_size_ratio | default(0) | float != ceph_vm_pool_target_size_ratio | float
+
+- name: List the storages
+  ansible.builtin.command: pvesh get /storage --output-format json
+  register: ceph_storages
+  changed_when: false
+  check_mode: false
+  run_once: true
+
+- name: Add the VM storage
+  ansible.builtin.command:
+    argv:
+      - pvesm
+      - add
+      - rbd
+      - "{{ ceph_vm_pool }}"
+      - --pool
+      - "{{ ceph_vm_pool }}"
+      - --content
+      - images,rootdir
+  run_once: true
+  changed_when: true
+  when:
+    - not ansible_check_mode or ceph_vm_pool_current | length > 0
+    - ceph_vm_pool not in ceph_storages.stdout | from_json | map(attribute='storage')

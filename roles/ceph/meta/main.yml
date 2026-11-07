@@ -1,0 +1,16 @@
+---
+galaxy_info:
+  author: Patrick Pfurtscheller
+  description: Set up a hyper-converged Ceph cluster with Proxmox VE (RBD for VMs, CephFS with an erasure-coded media directory)
+  license: GPL-3.0-or-later
+  min_ansible_version: "2.19"
+  platforms:
+    - name: Debian
+      versions:
+        - trixie
+  galaxy_tags:
+    - proxmox
+    - ceph
+    - storage
+
+dependencies: []

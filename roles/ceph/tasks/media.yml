@@ -1,0 +1,126 @@
+---
+# Proxmox VE creates erasure-coded pools only as RBD storage, so the CephFS
+# data pool is set up with the ceph tools. It is visible and manageable in the
+# web interface like every other pool.
+
+- name: List the erasure code profiles
+  ansible.builtin.command: ceph osd erasure-code-profile ls --format json
+  register: ceph_ec_profiles
+  changed_when: false
+  check_mode: false
+  run_once: true
+  when: not ansible_check_mode or ceph_conf_stat.stat.exists
+
+# A profile cannot change once a pool uses it; the name contains k and m.
+- name: Create the erasure code profile
+  ansible.builtin.command:
+    argv:
+      - ceph
+      - osd
+      - erasure-code-profile
+      - set
+      - "{{ ceph_media_profile }}"
+      - k={{ ceph_media_k }}
+      - m={{ ceph_media_m }}
+      - crush-failure-domain=host
+      - technique=reed_sol_van
+  run_once: true
+  changed_when: true
+  when:
+    - ceph_ec_profiles is not skipped
+    - ceph_media_profile not in ceph_ec_profiles.stdout | from_json
+
+- name: List the Ceph pools
+  ansible.builtin.command: ceph osd pool ls --format json
+  register: ceph_pool_names
+  changed_when: false
+  check_mode: false
+  run_once: true
+  when: ceph_ec_profiles is not skipped
+
+- name: Create the media pool
+  ansible.builtin.command:
+    argv: [ceph, osd, pool, create, "{{ ceph_media_pool }}", erasure, "{{ ceph_media_profile }}"]
+  run_once: true
+  changed_when: true
+  when:
+    - ceph_pool_names is not skipped
+    - ceph_media_pool not in ceph_pool_names.stdout | from_json
+
+- name: Read the media pool settings
+  ansible.builtin.command:
+    argv: [ceph, osd, pool, get, "{{ ceph_media_pool }}", all, --format, json]
+  register: ceph_media_settings
+  changed_when: false
+  check_mode: false
+  run_once: true
+  when:
+    - ceph_pool_names is not skipped
+    - not ansible_check_mode or ceph_media_pool in ceph_pool_names.stdout | from_json
+
+# CephFS needs overwrites on erasure-coded pools; FastEC (Tentacle) speeds up
+# small reads and writes and cannot be turned off again.
+- name: Configure the media pool
+  vars:
+    ceph_media_current: "{{ ceph_media_settings.stdout | from_json }}"
+  ansible.builtin.command:
+    argv: [ceph, osd, pool, set, "{{ ceph_media_pool }}", "{{ ceph_media_setting.key }}", "{{ ceph_media_setting.value }}"]
+  loop: "{{ ceph_media_pool_settings | dict2items }}"
+  loop_control:
+    loop_var: ceph_media_setting
+    label: "{{ ceph_media_setting.key }}={{ ceph_media_setting.value }}"
+  run_once: true
+  changed_when: true
+  when:
+    - ceph_media_settings is not skipped
+    - ceph_media_current[ceph_media_setting.key] | default('') | string | lower != ceph_media_setting.value | string | lower
+
+- name: Read the data pools of the file system
+  ansible.builtin.command: ceph fs ls --format json
+  register: ceph_fs_pools
+  changed_when: false
+  check_mode: false
+  run_once: true
+  when: ceph_media_settings is not skipped
+
+- name: Add the media pool to the file system
+  ansible.builtin.command:
+    argv: [ceph, fs, add_data_pool, "{{ ceph_fs_name }}", "{{ ceph_media_pool }}"]
+  run_once: true
+  changed_when: true
+  when:
+    - ceph_fs_pools is not skipped
+    - >-
+      ceph_media_pool not in
+      (ceph_fs_pools.stdout | from_json | selectattr('name', 'eq', ceph_fs_name) | first | default({})).data_pools | default([])
+
+- name: Create the media directory
+  ansible.builtin.file:
+    path: "{{ ceph_media_path }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  run_once: true
+
+# New files below the directory go to the media pool; set it before adding
+# files, existing files keep their pool. community.general.xattr cannot be
+# used: CephFS layouts are virtual attributes that a dump does not list.
+- name: Read the layout of the media directory
+  ansible.builtin.command:
+    argv: [getfattr, --only-values, --name, ceph.dir.layout.pool, "{{ ceph_media_path }}"]
+  register: ceph_media_layout
+  changed_when: false
+  check_mode: false
+  failed_when: false
+  run_once: true
+  when: not ansible_check_mode
+
+- name: Store the media directory in the media pool
+  ansible.builtin.command:
+    argv: [setfattr, --name, ceph.dir.layout.pool, --value, "{{ ceph_media_pool }}", "{{ ceph_media_path }}"]
+  run_once: true
+  changed_when: true
+  when:
+    - ceph_media_layout is not skipped
+    - ceph_media_layout.stdout != ceph_media_pool

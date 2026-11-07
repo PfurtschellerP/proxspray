@@ -1,0 +1,63 @@
+---
+- name: Validate Ceph variables
+  ansible.builtin.assert:
+    that:
+      - ceph_release in ceph_release_major
+      - ceph_public_network is match('^[0-9.]+/[0-9]+$')
+      - ceph_cluster_network is match('^[0-9.]+/[0-9]+$')
+      - ceph_mon_address is match('^((25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1?[0-9]?[0-9])$')
+      - >-
+        ceph_osd_devices == 'auto'
+        or (ceph_osd_devices is sequence and ceph_osd_devices is not string and ceph_osd_devices | length > 0
+            and ceph_osd_devices | select('match', '^/dev/') | list | length == ceph_osd_devices | length)
+      - ceph_osd_model is string
+      - ceph_osd_memory_target | float >= 1
+      - ceph_mds_cache_memory_limit | float > 0
+      - ceph_vm_pool_size | int >= 2
+      - ceph_vm_pool_min_size | int >= 2
+      - ceph_vm_pool_min_size | int <= ceph_vm_pool_size | int
+    fail_msg: >-
+      {{ inventory_hostname }}: ceph_release must be squid or tentacle (got '{{ ceph_release }}'), the networks CIDRs
+      (got '{{ ceph_public_network }}', '{{ ceph_cluster_network }}'), ceph_mon_address an IPv4 address (got
+      '{{ ceph_mon_address }}', set node_id) and ceph_osd_devices 'auto' or a list of /dev paths, e.g.
+      /dev/disk/by-id/... (got {{ ceph_osd_devices }}). A pool needs at least 2 replicas and min_size 2 to 'size'.
+    quiet: true
+
+- name: Validate the erasure-coded media pool
+  ansible.builtin.assert:
+    that:
+      - ceph_media_k | int >= 2
+      - ceph_media_m | int >= 1
+      - ceph_media_k | int + ceph_media_m | int <= ansible_play_hosts_all | length
+      - ceph_media_min_size | int >= ceph_media_k | int
+      - ceph_media_min_size | int <= ceph_media_k | int + ceph_media_m | int
+      - ceph_media_directory is match('^[A-Za-z0-9._-]+$')
+    fail_msg: >-
+      The media pool needs k >= 2 and m >= 1 chunks on k+m different nodes ({{ ansible_play_hosts_all | length }}
+      available, got k={{ ceph_media_k }} m={{ ceph_media_m }}), min_size between k and k+m (got
+      {{ ceph_media_min_size }}) and a plain directory name (got '{{ ceph_media_directory }}').
+    quiet: true
+  run_once: true
+  when: ceph_media_enabled | bool
+
+- name: Check the listed OSD disks
+  ansible.builtin.stat:
+    path: "{{ ceph_osd_device }}"
+    follow: true
+    get_checksum: false
+  loop: "{{ ceph_osd_devices if ceph_osd_devices != 'auto' else [] }}"
+  loop_control:
+    loop_var: ceph_osd_device
+  register: ceph_osd_stat
+
+- name: Assert that the listed OSD disks exist
+  vars:
+    ceph_osd_missing: >-
+      {{ ceph_osd_stat.results | rejectattr('stat.isblk', 'defined') | map(attribute='ceph_osd_device') | list
+         + ceph_osd_stat.results | selectattr('stat.isblk', 'defined') | rejectattr('stat.isblk') | map(attribute='ceph_osd_device') | list }}
+  ansible.builtin.assert:
+    that: ceph_osd_missing | length == 0
+    fail_msg: >-
+      {{ ceph_osd_missing | join(', ') }} on {{ inventory_hostname }} is not a block device; see
+      `ls -l /dev/disk/by-id/`.
+    quiet: true

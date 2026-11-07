@@ -1,0 +1,81 @@
+---
+# Hyper-converged Ceph managed by Proxmox VE: a monitor, manager and metadata
+# server on every node, OSDs on the configured disks, an RBD pool for VM disks
+# and a CephFS whose media directory is stored erasure coded.
+
+# Ceph release (squid or tentacle). The package repository is configured by
+# the proxmox role (proxmox_ceph_release, proxmox_ceph_repository).
+ceph_release: "{{ proxmox_ceph_release | default('tentacle') }}"
+
+# Network of the monitors and clients (public) and of OSD replication
+# (cluster). Defaults to the Thunderbolt fabric. Cannot be changed with this
+# role once the cluster exists.
+ceph_public_network: "{{ fabric_ip_prefix | default('10.100.0.0/24') }}"
+ceph_cluster_network: "{{ ceph_public_network }}"
+
+# Address of this node's monitor in the public network. Defaults to the
+# node's fabric router ID (<first three octets>.<node_id>).
+ceph_mon_address: >-
+  {{ fabric_router_id | default((ceph_public_network | split('.'))[:3] | join('.') ~ '.' ~ node_id | default('')) }}
+
+# Disks that become OSDs:
+#   auto  every empty disk of the node that is not a USB device (e.g. the
+#         installer stick). Proxmox VE reports disks with partitions, LVM, a
+#         file system or other signatures as used, so the system disk and
+#         disks holding data are never picked; install_media_wipe_disks
+#         empties the data disks on installation.
+#   list  stable paths of this node's disks, set per host, e.g.
+#         ["/dev/disk/by-id/ata-Samsung_SSD_870_QVO_4TB_S5STNF0W123456X"]
+# Existing OSDs are left alone. Every node needs at least one OSD.
+ceph_osd_devices: auto
+# With auto, only disks whose model (as Proxmox VE reports it, e.g.
+# "Samsung_SSD_870_QVO_4TB") matches this regular expression; empty: any model.
+ceph_osd_model: ""
+
+# Memory of each OSD daemon and cache of the metadata servers, in GiB (Ceph
+# defaults: 4 and 4). Less leaves more memory for guests on small nodes at
+# the cost of cache hits.
+ceph_osd_memory_target: 3
+ceph_mds_cache_memory_limit: 1
+
+# --- RBD pool for VM disks and container volumes ----------------------------
+
+# Pool and Proxmox VE storage name.
+ceph_vm_pool: vm
+# Replicas and the minimum of replicas that must be available for I/O. 3/2
+# survives one failed node without blocking I/O.
+ceph_vm_pool_size: 3
+ceph_vm_pool_min_size: 2
+# Expected share of the raw capacity; lets the PG autoscaler size the pools
+# before they fill up. Relative to the other pools' ratios.
+ceph_vm_pool_target_size_ratio: 0.2
+
+# --- CephFS -------------------------------------------------------------------
+
+# File system and Proxmox VE storage name, mounted at /mnt/pve/<name> on all
+# nodes. Its default data pool (replicated) holds ISO images, templates,
+# snippets and everything outside the media directory.
+ceph_fs_name: cephfs
+ceph_fs_pg_num: 32
+
+# --- Erasure-coded media directory in CephFS ----------------------------------
+
+# Store /mnt/pve/<ceph_fs_name>/<ceph_media_directory> in an erasure-coded
+# pool: k data and m coding chunks, one per node. 2+1 needs three nodes,
+# survives one failed node and uses 1.5x the raw space instead of 3x.
+ceph_media_enabled: true
+ceph_media_pool: cephfs_media
+ceph_media_directory: media
+ceph_media_k: 2
+ceph_media_m: 1
+# Chunks that must be available for I/O. k (2) keeps the media available while
+# a node is down (e.g. rebooting for updates), but data written meanwhile has
+# no redundancy until the node is back. k+1 (3), as Ceph recommends, blocks
+# all media I/O whenever a node is down.
+ceph_media_min_size: 2
+ceph_media_target_size_ratio: 0.7
+
+# Wait for HEALTH_OK, all OSDs up and in, all PGs active+clean and active
+# storages after the configuration.
+ceph_verify: true
+ceph_verify_timeout: 300

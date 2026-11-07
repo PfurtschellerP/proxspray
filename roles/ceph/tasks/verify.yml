@@ -1,0 +1,59 @@
+---
+- name: Wait for a healthy Ceph cluster
+  ansible.builtin.command: ceph status --format json
+  register: ceph_health
+  changed_when: false
+  run_once: true
+  until: ceph_healthy
+  retries: "{{ ceph_retries }}"
+  delay: 10
+  failed_when: false
+
+- name: Read the health details
+  ansible.builtin.command: ceph health detail
+  register: ceph_health_detail
+  changed_when: false
+  run_once: true
+  when: not ceph_healthy
+
+- name: Assert that the Ceph cluster is healthy
+  ansible.builtin.assert:
+    that: ceph_healthy
+    fail_msg: >-
+      Ceph is not healthy with all {{ ceph_osds_expected }} OSDs up and in and all PGs active+clean after
+      {{ ceph_verify_timeout }} seconds: {{ ceph_health_detail.stdout | default('') }} Check `ceph -s` and
+      `ceph osd tree`.
+    quiet: true
+  run_once: true
+
+- name: Check the Ceph storages of this node
+  ansible.builtin.command: pvesh get /nodes/{{ ceph_node }}/storage --output-format json
+  register: ceph_node_storages
+  changed_when: false
+
+- name: Assert that the Ceph storages are active
+  vars:
+    ceph_wanted: "{{ [ceph_vm_pool, ceph_fs_name] }}"
+    ceph_active: "{{ ceph_node_storages.stdout | from_json | selectattr('active', 'eq', 1) | map(attribute='storage') | list }}"
+  ansible.builtin.assert:
+    that: ceph_wanted | reject('in', ceph_active) | list | length == 0
+    fail_msg: >-
+      Storage {{ ceph_wanted | reject('in', ceph_active) | join(', ') }} is not active on {{ inventory_hostname }};
+      check `pvesm status` and `journalctl -u pvestatd`.
+    quiet: true
+
+- name: Check the layout of the media directory
+  ansible.builtin.command:
+    argv: [getfattr, --only-values, --name, ceph.dir.layout.pool, "{{ ceph_media_path }}"]
+  register: ceph_media_layout_check
+  changed_when: false
+  run_once: true
+  when: ceph_media_enabled | bool
+
+- name: Assert that media files go to the media pool
+  ansible.builtin.assert:
+    that: ceph_media_layout_check.stdout == ceph_media_pool
+    fail_msg: "{{ ceph_media_path }} stores new files in '{{ ceph_media_layout_check.stdout }}', not '{{ ceph_media_pool }}'."
+    quiet: true
+  run_once: true
+  when: ceph_media_enabled | bool

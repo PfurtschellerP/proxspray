@@ -1,0 +1,80 @@
+---
+# One metadata server per node: one active, the others standby.
+- name: Check for the metadata server of this node
+  ansible.builtin.stat:
+    path: /var/lib/ceph/mds/ceph-{{ ceph_node }}
+  register: ceph_mds_dir
+
+# One at a time: each creation rewrites ceph.conf, parallel runs lose sections.
+- name: Create the metadata server of this node
+  ansible.builtin.command: pveceph mds create
+  throttle: 1
+  changed_when: true
+  when: not ceph_mds_dir.stat.exists
+
+- name: List the Ceph file systems
+  ansible.builtin.command: ceph fs ls --format json
+  register: ceph_fs_list
+  changed_when: false
+  check_mode: false
+  run_once: true
+  when: not ansible_check_mode or ceph_conf_stat.stat.exists
+
+- name: Note the current file system
+  ansible.builtin.set_fact:
+    ceph_fs_current: >-
+      {{ ceph_fs_list.stdout | default('[]') | from_json | selectattr('name', 'eq', ceph_fs_name) | first | default({}) }}
+
+# Creates <name>_data and <name>_metadata (replicated) and the storage, which
+# Proxmox VE mounts at /mnt/pve/<name> on every node.
+- name: Create the file system
+  ansible.builtin.command:
+    argv:
+      - pveceph
+      - fs
+      - create
+      - --name
+      - "{{ ceph_fs_name }}"
+      - --pg_num
+      - "{{ ceph_fs_pg_num | string }}"
+      - --add-storage
+      - "1"
+  run_once: true
+  changed_when: true
+  when: ceph_fs_current | length == 0
+
+# pveceph only warns when it cannot add the storage, so check again.
+- name: List the storages after creating the file system
+  ansible.builtin.command: pvesh get /storage --output-format json
+  register: ceph_storages
+  changed_when: false
+  check_mode: false
+  run_once: true
+
+- name: Add the file system storage
+  ansible.builtin.command:
+    argv:
+      - pvesm
+      - add
+      - cephfs
+      - "{{ ceph_fs_name }}"
+      - --fs-name
+      - "{{ ceph_fs_name }}"
+      - --content
+      - iso,vztmpl,backup,snippets
+  run_once: true
+  changed_when: true
+  when:
+    - not ansible_check_mode or ceph_fs_current | length > 0
+    - ceph_fs_name not in ceph_storages.stdout | from_json | map(attribute='storage')
+
+- name: Wait for the file system to be mounted
+  ansible.builtin.command:
+    argv: [mountpoint, -q, "{{ ceph_fs_mount }}"]
+  register: ceph_fs_mounted
+  changed_when: false
+  check_mode: false
+  until: ceph_fs_mounted.rc == 0
+  retries: "{{ ceph_retries }}"
+  delay: 10
+  when: not ansible_check_mode
