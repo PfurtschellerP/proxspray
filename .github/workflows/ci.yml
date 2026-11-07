@@ -63,7 +63,9 @@ jobs:
           ansible-galaxy collection install -r .devcontainer/requirements.yml
 
       - name: Syntax check from the checkout
-        run: ansible-playbook -i inventory/sample/inventory.ini setup.yml --syntax-check
+        run: |
+          ansible-playbook -i inventory/sample/inventory.ini --syntax-check \
+            setup.yml install_media.yml reinstall.yml update.yml
 
       - name: Build collection
         run: ansible-galaxy collection build --output-path dist
@@ -76,8 +78,10 @@ jobs:
           ANSIBLE_COLLECTIONS_PATH: ${{ runner.temp }}/collections:~/.ansible/collections
         run: |
           ansible-galaxy collection install "$GITHUB_WORKSPACE"/dist/*.tar.gz -p "$RUNNER_TEMP/collections"
-          ansible-playbook -i "$GITHUB_WORKSPACE/inventory/sample/inventory.ini" \
-            pfurtschellerp.proxspray.setup --syntax-check
+          for playbook in setup install_media reinstall update; do
+            ansible-playbook -i "$GITHUB_WORKSPACE/inventory/sample/inventory.ini" \
+              "pfurtschellerp.proxspray.$playbook" --syntax-check
+          done
 
       - uses: actions/upload-artifact@v4
         with:
