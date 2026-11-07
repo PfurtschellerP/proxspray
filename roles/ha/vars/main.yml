@@ -1,0 +1,43 @@
+---
+# Comment of the HA resources and rules created by proxspray, so that removed
+# entries can be told apart from those created in the web interface.
+ha_marker: Managed by proxspray
+
+ha_policies: [conditional, freeze, failover, migrate]
+ha_states: [started, stopped, disabled, ignored]
+ha_rule_types: [node-affinity, resource-affinity]
+ha_retries: "{{ (ha_timeout | int / 5) | round(0, 'ceil') | int }}"
+ha_node_names: "{{ groups['all'] | map('extract', hostvars, ['ansible_facts', 'hostname']) | list }}"
+
+# community.proxmox needs proxmoxer >= 2.3, Debian 13 ships 2.2; the same
+# virtualenv as the proxmox role (proxmox_venv).
+ha_venv: /opt/proxspray/venv
+ha_proxmoxer: proxmoxer==2.3.0
+
+# ha_resources as dicts with defaults; id stays as given (resolved to a sid
+# with the guest list, see validate.yml).
+ha_resources_normalized: >-
+  {%- set result = [] -%}
+  {%- for r in ha_resources -%}
+  {%-   set r = r if r is mapping else {'id': r} -%}
+  {%-   set _ = result.append({'id': r.id | string, 'vmid': (r.id | string).split(':') | last,
+                               'type': (r.id | string).split(':') | first if ':' in r.id | string else '',
+                               'state': r.state | default('started'),
+                               'max_restart': r.max_restart | default(1) | string,
+                               'max_relocate': r.max_relocate | default(1) | string}) -%}
+  {%- endfor -%}
+  {{ result }}
+
+# For verify.yml: the HA resources that are not (yet) in their requested
+# state, from `pvesh get /cluster/ha/status/current` (stopped and disabled
+# resources are both reported as stopped).
+ha_pending: >-
+  {%- set services = ha_status.stdout | default('[]', true) | from_json | selectattr('type', 'eq', 'service')
+                     | items2dict(key_name='sid', value_name='state') -%}
+  {%- set result = [] -%}
+  {%- for r in ha_wanted | default([]) | rejectattr('state', 'eq', 'ignored') -%}
+  {%-   if services[r.sid] | default('') != ('started' if r.state == 'started' else 'stopped') -%}
+  {%-     set _ = result.append(r.sid ~ ' (' ~ services[r.sid] | default('unknown') ~ ', wanted ' ~ r.state ~ ')') -%}
+  {%-   endif -%}
+  {%- endfor -%}
+  {{ result }}

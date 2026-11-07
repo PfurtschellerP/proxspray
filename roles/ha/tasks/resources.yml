@@ -1,0 +1,112 @@
+---
+# HA resources and rules live in /etc/pve/ha and are configured once for the
+# cluster. The modules have no check mode, so check mode skips them.
+
+- name: Install python3-venv
+  ansible.builtin.apt:
+    name: python3-venv
+    state: present
+
+# Required by the community.proxmox modules; the proxmox role installs it
+# too, this covers runs with only the ha tag.
+- name: Install proxmoxer
+  ansible.builtin.pip:
+    name: "{{ ha_proxmoxer }}"
+    virtualenv: "{{ ha_venv }}"
+    virtualenv_command: python3 -m venv
+    virtualenv_site_packages: true
+  register: ha_proxmoxer_installed
+
+- name: List the HA resources and rules
+  ansible.builtin.command: pvesh get /cluster/ha/{{ ha_kind }} --output-format json
+  loop: [resources, rules]
+  loop_control:
+    loop_var: ha_kind
+  register: ha_current
+  changed_when: false
+  check_mode: false
+  run_once: true
+
+- name: Note the HA resources and rules created by proxspray
+  ansible.builtin.set_fact:
+    ha_ours_resources: >-
+      {{ ha_current.results[0].stdout | from_json | selectattr('comment', 'defined')
+         | selectattr('comment', 'match', ha_marker) | map(attribute='sid') | list }}
+    ha_ours_rules: >-
+      {{ ha_current.results[1].stdout | from_json | selectattr('comment', 'defined')
+         | selectattr('comment', 'match', ha_marker) | map(attribute='rule') | list }}
+    # Rules with their resources as sids (vm:100), as the API returns them.
+    ha_rules_wanted: >-
+      {%- set result = [] -%}
+      {%- for rule in ha_rules -%}
+      {%-   set vmids = rule.resources | map('string') | map('split', ':') | map('last') | list -%}
+      {%-   set _ = result.append(rule | combine({'sids': ha_wanted | selectattr('vmid', 'in', vmids)
+                                                          | map(attribute='sid') | sort})) -%}
+      {%- endfor -%}
+      {{ result }}
+  run_once: true
+
+- name: Configure HA resources
+  vars:
+    ansible_python_interpreter: "{{ ha_venv }}/bin/python"
+  community.proxmox.proxmox_cluster_ha_resources:
+    name: "{{ ha_resource.sid }}"
+    hastate: "{{ ha_resource.state }}"
+    max_restart: "{{ ha_resource.max_restart | int }}"
+    max_relocate: "{{ ha_resource.max_relocate | int }}"
+    # Also needed for idempotency: the module compares an empty comment with
+    # the missing key of the API response.
+    comment: "{{ ha_marker }}"
+    state: present
+  loop: "{{ ha_wanted }}"
+  loop_control:
+    loop_var: ha_resource
+    label: "{{ ha_resource.sid }} {{ ha_resource.name }}"
+  run_once: true
+
+- name: Configure HA rules
+  vars:
+    ansible_python_interpreter: "{{ ha_venv }}/bin/python"
+  community.proxmox.proxmox_cluster_ha_rules:
+    name: "{{ ha_rule.name }}"
+    type: "{{ ha_rule.type }}"
+    resources: "{{ ha_rule.sids }}"
+    nodes: "{{ ha_rule.nodes | map('string') | list if ha_rule.type == 'node-affinity' else omit }}"
+    strict: "{{ ha_rule.strict | default(false) | bool if ha_rule.type == 'node-affinity' else omit }}"
+    affinity: "{{ ha_rule.affinity if ha_rule.type == 'resource-affinity' else omit }}"
+    comment: "{{ ha_marker }}"
+    disable: false
+    # A rule's type cannot be changed; recreate it instead.
+    force: true
+    state: present
+  # In check mode on a new node, proxmoxer is not installed yet.
+  when: not (ansible_check_mode and ha_proxmoxer_installed is changed)
+  loop: "{{ ha_rules_wanted }}"
+  loop_control:
+    loop_var: ha_rule
+    label: "{{ ha_rule.name }}"
+  run_once: true
+
+# Rules first: they may still refer to the resources that are removed.
+- name: Remove HA rules that are no longer configured
+  vars:
+    ansible_python_interpreter: "{{ ha_venv }}/bin/python"
+  community.proxmox.proxmox_cluster_ha_rules:
+    name: "{{ ha_stale }}"
+    state: absent
+  when: not (ansible_check_mode and ha_proxmoxer_installed is changed)
+  loop: "{{ ha_ours_rules | reject('in', ha_rules | map(attribute='name')) | list }}"
+  loop_control:
+    loop_var: ha_stale
+  run_once: true
+
+- name: Remove HA resources that are no longer configured
+  vars:
+    ansible_python_interpreter: "{{ ha_venv }}/bin/python"
+  community.proxmox.proxmox_cluster_ha_resources:
+    name: "{{ ha_stale }}"
+    state: absent
+  loop: "{{ ha_ours_resources | reject('in', ha_wanted | map(attribute='sid')) | list }}"
+  loop_control:
+    loop_var: ha_stale
+  run_once: true

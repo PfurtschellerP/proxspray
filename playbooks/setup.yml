@@ -47,6 +47,15 @@
     - role: ceph
       tags: ceph
 
+# After Ceph: HA guests need shared storage.
+- name: Configure high availability
+  hosts: all
+  gather_facts: false
+  become: true
+  roles:
+    - role: ha
+      tags: ha
+
 - name: Configure certificates
   hosts: all
   gather_facts: false

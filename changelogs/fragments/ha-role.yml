@@ -1,0 +1,3 @@
+---
+major_changes:
+  - ha - new role for high availability of guests. It manages HA resources (``ha_resources``) and Proxmox VE 9 node and resource affinity rules (``ha_rules``), checks before any change that every HA guest exists and keeps all its disks on shared storage, removes the resources and rules it created once they are no longer listed, and waits until the guests reach their requested state. ``ha_shutdown_policy`` (default ``migrate``) live-migrates HA guests away when a node is rebooted or shut down on purpose.

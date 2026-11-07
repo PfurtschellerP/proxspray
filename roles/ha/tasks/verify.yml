@@ -1,0 +1,21 @@
+---
+- name: Wait until the HA resources reach their state
+  ansible.builtin.command: pvesh get /cluster/ha/status/current --output-format json
+  register: ha_status
+  changed_when: false
+  until: ha_status.rc == 0 and ha_pending | length == 0
+  retries: "{{ ha_retries }}"
+  delay: 5
+  failed_when: false
+  run_once: true
+  when: ha_wanted | rejectattr('state', 'eq', 'ignored') | list | length > 0
+
+- name: Assert that the HA resources reached their state
+  ansible.builtin.assert:
+    that: ha_status.rc == 0 and ha_pending | length == 0
+    fail_msg: >-
+      HA resources did not reach their state within {{ ha_timeout }} s: {{ ha_pending | join(', ') }}. Check
+      `ha-manager status` and the task log of the guest, and `journalctl -u pve-ha-crm -u pve-ha-lrm` on its node.
+    quiet: true
+  run_once: true
+  when: ha_status is not skipped
