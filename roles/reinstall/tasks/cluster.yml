@@ -16,7 +16,7 @@
        | select('in', reinstall_members) | list }}
   loop_control:
     loop_var: reinstall_leaving_node
-  delegate_to: "{{ reinstall_remaining_hosts | first }}"
+  delegate_to: "{{ reinstall_remaining_hosts | first | default(inventory_hostname) }}"
   run_once: true
   changed_when: true
   when:
@@ -31,7 +31,7 @@
   loop: "{{ ansible_play_hosts_all | map('extract', hostvars) | map(attribute='reinstall_pve_node') | list }}"
   loop_control:
     loop_var: reinstall_leaving_node
-  delegate_to: "{{ reinstall_remaining_hosts | first }}"
+  delegate_to: "{{ reinstall_remaining_hosts | first | default(inventory_hostname) }}"
   run_once: true
   when:
     - reinstall_remaining_hosts | length > 0

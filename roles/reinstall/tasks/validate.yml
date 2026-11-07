@@ -79,7 +79,7 @@
 
 - name: Get the status of the remaining cluster
   ansible.builtin.command: pvesh get /cluster/status --output-format json
-  delegate_to: "{{ reinstall_remaining_hosts | first }}"
+  delegate_to: "{{ reinstall_remaining_hosts | first | default(inventory_hostname) }}"
   run_once: true
   register: reinstall_cluster_status
   changed_when: false
