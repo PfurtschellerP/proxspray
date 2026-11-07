@@ -33,8 +33,10 @@ formatting. This file only lists what the linters don't check.
   `certificates`.
   Every role has a tag with its own name.
 - Other top-level playbooks follow the same pattern: `install_media.yml`
-  (runs on the controller, every task `delegate_to: localhost`) and
-  `reinstall.yml` (destructive, guarded by `reinstall_confirm`).
+  (runs on the controller, every task `delegate_to: localhost`),
+  `reinstall.yml` (destructive, guarded by `reinstall_confirm`) and
+  `update.yml` (rolling update: a check play, the nodes with `serial: 1`, a
+  finish play, all from one role via `tasks_from`).
 - Generated files go to `<inventory>/artifacts/`, generated secrets to
   `<inventory>/credentials/`; both are git-ignored and excluded from the
   collection build.
@@ -141,7 +143,8 @@ Run before considering a change done (`just check` runs them all):
 ansible-lint                     # production profile
 yamllint .
 antsibull-changelog lint
-ansible-playbook -i inventory/sample/inventory.ini setup.yml --syntax-check
+ansible-playbook -i inventory/sample/inventory.ini --syntax-check \
+  setup.yml install_media.yml reinstall.yml update.yml
 ```
 
 `ansible-test sanity` needs the collection at
