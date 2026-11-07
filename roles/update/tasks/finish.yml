@@ -1,0 +1,31 @@
+---
+# Last play of update.yml, once all nodes are done.
+
+- name: Wait for a healthy cluster
+  ansible.builtin.import_tasks: health.yml
+
+- name: Read the Ceph flags
+  ansible.builtin.command: ceph osd dump --format json
+  register: update_osd_dump
+  changed_when: false
+  check_mode: false
+  run_once: true
+  when: update_ceph_conf.stat.exists
+
+- name: Clear the Ceph noout flag
+  ansible.builtin.command: ceph osd unset noout
+  changed_when: true
+  run_once: true
+  when:
+    - update_ceph_conf.stat.exists
+    - "'noout' in (update_osd_dump.stdout | from_json).flags_set | default([])"
+
+- name: Read the versions
+  ansible.builtin.command: pveversion
+  register: update_version
+  changed_when: false
+  check_mode: false
+
+- name: Show the versions
+  ansible.builtin.debug:
+    msg: "{{ update_node }}: {{ update_version.stdout }}"

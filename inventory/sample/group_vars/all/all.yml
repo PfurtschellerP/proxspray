@@ -22,6 +22,11 @@
 # reinstall_update_media: true               # rewrite outdated sticks
 # reinstall_destroy_guests: false
 
+## Rolling update (roles/update, update.yml)
+# update_reboot: auto                        # auto | always | never
+# update_migrate: true                       # move running guests away and back
+# update_memory_reserve: 2048                # MiB kept free on nodes receiving guests
+
 ## Proxmox VE (roles/proxmox)
 # proxmox_repository: no-subscription        # enterprise | no-subscription | test
 # proxmox_ceph_repository: no-subscription   # enterprise | no-subscription | test | none

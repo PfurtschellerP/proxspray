@@ -20,7 +20,7 @@ EOF
 chown root:root /etc/ssh/ssh_host_*
 chmod 0600 /etc/ssh/ssh_host_*_key
 chmod 0644 /etc/ssh/ssh_host_*_key.pub
-{% if install_media_wipe_disks %}
+{% if install_media_wipe_disks | bool %}
 
 # Disks of the new system: below the root file system (LVM or btrfs members)
 # or in the ZFS root pool. Matched by what is in use, not by name, because an

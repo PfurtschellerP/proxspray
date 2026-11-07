@@ -1,0 +1,66 @@
+---
+- name: Read the Ceph flags
+  ansible.builtin.command: ceph osd dump --format json
+  register: update_osd_dump
+  changed_when: false
+  check_mode: false
+  when: update_ceph_conf.stat.exists
+
+# Keeps Ceph from marking the rebooting node's OSDs out and moving data.
+- name: Set the Ceph noout flag
+  ansible.builtin.command: ceph osd set noout
+  changed_when: true
+  when:
+    - update_ceph_conf.stat.exists
+    - "'noout' not in (update_osd_dump.stdout | from_json).flags_set | default([])"
+
+- name: Upgrade all packages
+  ansible.builtin.apt:
+    upgrade: dist
+    dpkg_options: force-confdef,force-confold
+  when: update_packages | length > 0 or update_force | bool
+
+# The upgrade may have installed a new kernel.
+- name: List the installed kernels
+  ansible.builtin.find:
+    paths: /boot
+    patterns: vmlinuz-*
+  register: update_kernels
+
+- name: Check whether a reboot is requested
+  ansible.builtin.stat:
+    path: /run/reboot-required
+  register: update_reboot_required
+
+- name: Note the kernel to boot
+  ansible.builtin.set_fact:
+    update_newest_kernel: >-
+      {{ update_kernels.files | map(attribute='path') | map('basename') | map('regex_replace', '^vmlinuz-', '')
+         | community.general.version_sort | last | default(ansible_facts.kernel) }}
+
+- name: Reboot the node
+  ansible.builtin.reboot:
+    msg: Rebooting for updates (proxspray)
+    reboot_timeout: "{{ update_reboot_timeout | int }}"
+  when: >-
+    update_reboot == 'always'
+    or (update_reboot == 'auto' and (update_newest_kernel != ansible_facts.kernel or update_reboot_required.stat.exists))
+  register: update_rebooted
+
+- name: Read the running kernel
+  ansible.builtin.command: uname --kernel-release
+  register: update_running_kernel
+  changed_when: false
+  check_mode: false
+  when: update_rebooted is not skipped
+
+- name: Assert that the node runs the newest kernel
+  ansible.builtin.assert:
+    that: update_running_kernel.stdout == update_newest_kernel
+    fail_msg: >-
+      {{ update_node }} booted {{ update_running_kernel.stdout }} instead of {{ update_newest_kernel }}; check
+      `proxmox-boot-tool kernel list` for a pinned kernel.
+    quiet: true
+  when:
+    - update_rebooted is not skipped
+    - not ansible_check_mode

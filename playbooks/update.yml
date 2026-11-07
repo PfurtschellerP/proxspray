@@ -1,0 +1,48 @@
+---
+# Rolling update of all nodes: `ansible-playbook update.yml` (or
+# pfurtschellerp.proxspray.update). Add --check to see the plan, --limit to
+# update single nodes.
+
+- name: Check Ansible version
+  ansible.builtin.import_playbook: ansible_version.yml
+
+- name: Gather facts
+  ansible.builtin.import_playbook: facts.yml
+
+- name: Check the cluster before updating
+  hosts: all
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  tasks:
+    - name: Check the cluster and plan the update
+      ansible.builtin.import_role:
+        name: update
+        tasks_from: precheck.yml
+      tags: update
+
+# One node at a time; a failure stops the run before the next node.
+- name: Update nodes one at a time
+  hosts: all
+  gather_facts: false
+  become: true
+  serial: 1
+  max_fail_percentage: 0
+  any_errors_fatal: true
+  tasks:
+    - name: Update the node
+      ansible.builtin.import_role:
+        name: update
+      when: update_needed | bool
+      tags: update
+
+- name: Finish the update
+  hosts: all
+  gather_facts: false
+  become: true
+  tasks:
+    - name: Clear maintenance flags and check the cluster
+      ansible.builtin.import_role:
+        name: update
+        tasks_from: finish.yml
+      tags: update

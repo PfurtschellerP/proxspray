@@ -1,0 +1,20 @@
+---
+# One node of the rolling update (update.yml runs it with serial: 1, after
+# precheck.yml). Stops the whole run on any failure; the node then stays in
+# HA maintenance mode and Ceph keeps noout, see README.
+
+- name: Wait for a healthy cluster
+  ansible.builtin.import_tasks: health.yml
+
+- name: Move the guests off the node
+  ansible.builtin.import_tasks: evacuate.yml
+  when: update_migrate | bool
+
+- name: Upgrade and reboot the node
+  ansible.builtin.import_tasks: upgrade.yml
+
+- name: Wait for the cluster to recover
+  ansible.builtin.import_tasks: health.yml
+
+- name: Bring the guests back
+  ansible.builtin.import_tasks: restore.yml

@@ -27,7 +27,6 @@
       - install_media_disk_filter_match in ['any', 'all']
       - install_media_filesystem in ['ext4', 'xfs', 'zfs', 'btrfs']
       - install_media_filesystem_options is mapping
-      - install_media_wipe_disks is boolean
       - install_media_interface_names is mapping
       - install_media_keyboard | length > 0
       - install_media_country is match('^[a-z]{2}$')

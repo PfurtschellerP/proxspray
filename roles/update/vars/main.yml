@@ -1,0 +1,12 @@
+---
+# Proxmox VE node name of this host and of every inventory host.
+update_node: "{{ ansible_facts.hostname }}"
+update_node_names: "{{ groups['all'] | map('extract', hostvars) | map(attribute='ansible_facts') | map(attribute='hostname') | list }}"
+# Inventory host of every node name, to run commands on a migration target.
+update_host_of: "{{ dict(update_node_names | zip(groups['all'])) }}"
+
+update_health_retries: "{{ (update_health_timeout | int / 10) | round(0, 'ceil') | int }}"
+
+# Ceph health checks that are expected while updating: noout is set on purpose.
+update_ceph_allowed_checks:
+  - OSDMAP_FLAGS

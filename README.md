@@ -40,6 +40,7 @@ An Ansible collection (`pfurtschellerp.proxspray`) that turns three mini PCs int
 | Status | Feature |
 | :----: | ------- |
 | ✅ | Unattended installation: per-node installer ISOs generated from the inventory, reinstall from a plugged-in USB stick with a one-time UEFI boot |
+| ✅ | Rolling updates: health checks, guests moved away (HA maintenance mode, live and restart migration) and back, Ceph `noout`, reboot only when needed |
 | ✅ | Proxmox VE essentials: deb822 repositories (enterprise / no-subscription / test), packages, `/etc/hosts`, timezone, NTP |
 | ✅ | Thunderbolt links: `thunderbolt-net` modules, stable `en05`/`en06` naming via systemd `.link` files, MTU, hotplug and boot-time bringup |
 | ✅ | Proxmox VE cluster creation and node join (over SSH, no root password needed) |
@@ -97,6 +98,7 @@ The commonly changed settings are listed in [inventory/sample/group_vars/all/all
 | [thunderbolt](roles/thunderbolt/defaults/main.yml) | Thunderbolt links | `thunderbolt_devices` (interface → port path), `thunderbolt_mtu` |
 | [fabric](roles/fabric/defaults/main.yml) | Routed mesh, corosync link, migration network | `fabric_ip_prefix`, `fabric_corosync_link`, `fabric_migration_network`, `fabric_migration_type` |
 | [ceph](roles/ceph/defaults/main.yml) | Ceph monitors, managers, metadata servers, OSDs, pools, CephFS | `ceph_osd_devices`, `ceph_osd_model`, `ceph_media_*`, `ceph_osd_memory_target` |
+| [update](roles/update/defaults/main.yml) | Rolling update of all nodes (`update.yml`) | `update_reboot`, `update_migrate`, `update_memory_reserve` |
 | [certificates](roles/certificates/defaults/main.yml) | Web interface / API certificates | `certificates_mode`, `certificates_acme_*` |
 
 ### 💿 Installing the nodes
@@ -145,6 +147,22 @@ The media directory survives one failed node like the replicated pools. With `ce
 
 On nodes with little memory, OSD memory (`ceph_osd_memory_target`, 3 GiB) and the metadata server cache (`ceph_mds_cache_memory_limit`, 1 GiB) are below Ceph's defaults of 4 GiB each.
 
+### 🔄 Updating the cluster
+
+```bash
+ansible-playbook -i inventory/mycluster/inventory.ini update.yml --check   # show the plan
+ansible-playbook -i inventory/mycluster/inventory.ini update.yml
+```
+
+`update.yml` first checks the whole cluster: quorum, all nodes online, Ceph healthy with all PGs `active+clean`, no running backup or replication, no HA errors. It also finds out which nodes have pending upgrades or run an older kernel than the installed one; nodes with nothing to do are skipped (`update_force: true` updates them anyway). Then it updates one node at a time:
+
+1. Wait until the cluster is healthy.
+2. Enable HA maintenance mode, which moves HA guests away; live-migrate the other running VMs (local disks included) and restart-migrate containers to the nodes with the most free memory, after checking that they fit.
+3. Set Ceph `noout`, run `apt full-upgrade`, reboot if a new kernel is installed or a reboot is requested (`update_reboot`), and check that the new kernel runs.
+4. Wait for quorum, all nodes online and Ceph recovered, end maintenance mode (HA moves its guests back) and migrate the other guests back.
+
+Finally it clears `noout`. Any failure stops the run before the next node: the node stays in maintenance mode and Ceph keeps `noout`, so nothing moves back onto a broken node. Fix the cause and run `update.yml` again; it continues where it stopped.
+
 ### 🔐 Certificates
 
 By default (`certificates_mode: self_signed`) the nodes keep the certificates Proxmox VE issues from the cluster's own CA. The role regenerates them if they are about to expire or don't cover the node's name, and removes custom certificates. Set `certificates_fetch_ca: true` to copy `pve-root-ca.pem` to `<inventory>/artifacts/` and add it to your trust store.
@@ -170,6 +188,7 @@ Try it against the Let's Encrypt staging directory first (`certificates_acme_dir
 ├── setup.yml              # Entry point (imports playbooks/setup.yml)
 ├── install_media.yml      # Build the per-node installer ISOs
 ├── reinstall.yml          # Reinstall nodes from their plugged-in stick
+├── update.yml             # Rolling update of all nodes
 ├── playbooks/             # Playbooks, also available as pfurtschellerp.proxspray.<name>
 ├── roles/
 │   ├── install_media/     # Unattended installer ISOs (controller)
@@ -179,6 +198,7 @@ Try it against the Let's Encrypt staging directory first (`certificates_acme_dir
 │   ├── thunderbolt/       # Thunderbolt links
 │   ├── fabric/            # Routed mesh (SDN OpenFabric), corosync link, migration
 │   ├── ceph/              # Ceph: VM pool, CephFS, erasure-coded media directory
+│   ├── update/            # Rolling update with migration and maintenance flags
 │   └── certificates/      # Cluster CA or ACME certificates
 ├── inventory/sample/      # Example inventory
 ├── changelogs/            # antsibull-changelog fragments and history

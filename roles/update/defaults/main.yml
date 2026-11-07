@@ -1,0 +1,27 @@
+---
+# Rolling update of the cluster (update.yml): one node at a time, only while
+# the cluster is healthy. Running guests move to the other nodes for the
+# update and come back afterwards.
+
+# Reboot after the upgrade: auto (when a newer kernel than the running one is
+# installed or /run/reboot-required exists), always or never.
+update_reboot: auto
+
+# Also update and reboot nodes without pending upgrades or reboot.
+update_force: false
+
+# Move running guests off the node before the upgrade and back afterwards.
+# HA-managed guests are moved by HA maintenance mode, the others are migrated:
+# VMs live (local disks are copied along), containers by restart migration
+# (shut down, moved, started again), as containers cannot be live-migrated.
+update_migrate: true
+update_migrate_back: true
+# Seconds a container may take to shut down for its restart migration.
+update_container_shutdown_timeout: 180
+# Memory in MiB to keep free on every node that receives guests.
+update_memory_reserve: 2048
+
+# Seconds to wait for a node to come back after the reboot, and for the
+# cluster (quorum, all nodes online, Ceph recovery) to be healthy again.
+update_reboot_timeout: 1200
+update_health_timeout: 1800
