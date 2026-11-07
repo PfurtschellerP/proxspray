@@ -77,5 +77,15 @@
       matchUpdateTypes: ['major', 'minor'],
       enabled: false,
     },
+    {
+      // CI runs on the same Python as the Dev Container; ansible-core does not
+      // support Python 3.15 yet, so new minor versions are adopted by hand.
+      description: 'GitHub Actions: no Python minor or major upgrades of actions/setup-python',
+      matchManagers: ['github-actions'],
+      matchDepTypes: ['uses-with'],
+      matchDepNames: ['python'],
+      matchUpdateTypes: ['major', 'minor'],
+      enabled: false,
+    },
   ],
 }
