@@ -2,12 +2,32 @@
 # Commonly changed settings. Every role variable with its default and a short
 # description is listed in roles/<role>/defaults/main.yml.
 
+## Installation media (roles/install_media, install_media.yml)
+# install_media_domain: lab.example          # FQDN: <inventory name>.<domain>
+# install_media_gateway: 10.10.1.1
+# install_media_dns: 10.10.1.1
+# install_media_prefix: 24
+# install_media_interface_filter:            # management port, or node_mac per host
+#   ID_NET_NAME_PATH: enp86s0
+# install_media_keyboard: de
+# install_media_country: de
+# install_media_disk_list: [nvme0n1]         # WIPED; or install_media_disk_filter
+# install_media_filesystem: ext4             # ext4 | xfs | zfs | btrfs
+# install_media_wipe_disks: false            # wipe all other non-USB disks on first boot
+# install_media_root_password_hash: "{{ vault_root_password_hash }}"   # openssl passwd -6
+# install_media_root_ssh_keys:
+#   - ssh-ed25519 AAAA... you@laptop
+
+## Reinstall from the plugged-in stick (roles/reinstall, reinstall.yml)
+# reinstall_update_media: true               # rewrite outdated sticks
+# reinstall_destroy_guests: false
+
 ## Proxmox VE (roles/proxmox)
 # proxmox_repository: no-subscription        # enterprise | no-subscription | test
 # proxmox_ceph_repository: no-subscription   # enterprise | no-subscription | test | none
 # proxmox_ceph_release: tentacle
 # proxmox_apt_upgrade: false
-# proxmox_timezone: Europe/Vienna
+# proxmox_timezone: Europe/Berlin
 # proxmox_ntp_servers: []
 # proxmox_packages: []
 # proxmox_remove_subscription_nag: false

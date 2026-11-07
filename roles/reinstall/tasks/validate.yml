@@ -1,0 +1,106 @@
+---
+# Shared through hostvars for the cluster checks.
+- name: Note the Proxmox VE node name
+  ansible.builtin.set_fact:
+    reinstall_pve_node: "{{ reinstall_node_name }}"
+
+- name: Assert that the reinstall is confirmed
+  ansible.builtin.assert:
+    that: reinstall_confirm | string == ansible_play_hosts_all | sort | join(',')
+    fail_msg: >-
+      This WIPES {{ ansible_play_hosts_all | sort | join(', ') }} and installs Proxmox VE from scratch.
+      To go ahead, run again with -e reinstall_confirm={{ ansible_play_hosts_all | sort | join(',') }}
+      (got '{{ reinstall_confirm }}').
+    quiet: true
+
+- name: Check the node ISO on the controller
+  ansible.builtin.stat:
+    path: "{{ reinstall_iso }}"
+    checksum_algorithm: sha256
+  delegate_to: localhost
+  register: reinstall_iso_stat
+
+- name: Assert that the node ISO exists
+  ansible.builtin.assert:
+    that: reinstall_iso_stat.stat.exists
+    fail_msg: "{{ reinstall_iso }} not found. Build it first with the install_media playbook."
+    quiet: true
+
+- name: Check for UEFI
+  ansible.builtin.stat:
+    path: /sys/firmware/efi
+  register: reinstall_efi
+
+- name: Assert that the node boots with UEFI
+  ansible.builtin.assert:
+    that: reinstall_efi.stat.exists
+    fail_msg: "{{ inventory_hostname }} booted in legacy BIOS mode; the one-time boot from the stick needs UEFI."
+    quiet: true
+
+- name: Read the UEFI boot entries
+  ansible.builtin.import_tasks: boot_entries.yml
+
+# The stick stays plugged in. If the firmware preferred it over the disk, every
+# reboot would reinstall the node.
+- name: Assert that the node boots from its disk first
+  ansible.builtin.assert:
+    that:
+      - reinstall_boot_order | length > 0
+      - reinstall_boot_order | first == reinstall_boot_current
+      - reinstall_boot_current not in reinstall_boot_entries | selectattr('1', 'eq', reinstall_boot_entry_label) | map(attribute='0')
+    fail_msg: >-
+      {{ inventory_hostname }} booted from Boot{{ reinstall_boot_current }}, but the boot order starts with
+      {{ reinstall_boot_order | first | default('nothing') }} ({{ reinstall_boot_order | join(',') }}). Put the
+      system disk first in the firmware's boot order (or `efibootmgr --bootorder`), so the stick cannot boot by
+      accident.
+    quiet: true
+
+- name: Read the machine ID
+  ansible.builtin.slurp:
+    src: /etc/machine-id
+  register: reinstall_old_machine_id
+
+- name: List VMs and containers
+  ansible.builtin.command: pvesh get /cluster/resources --type vm --output-format json
+  register: reinstall_guests
+  changed_when: false
+  check_mode: false
+
+- name: Assert that no guests are lost
+  vars:
+    reinstall_node_guests: >-
+      {{ reinstall_guests.stdout | from_json | selectattr('node', 'eq', reinstall_pve_node) | map(attribute='id') | list }}
+  ansible.builtin.assert:
+    that: reinstall_destroy_guests | bool or reinstall_node_guests | length == 0
+    fail_msg: >-
+      {{ inventory_hostname }} still has guests: {{ reinstall_node_guests | join(', ') }}. Migrate or back them up,
+      or set reinstall_destroy_guests=true to lose them.
+    quiet: true
+
+- name: Get the status of the remaining cluster
+  ansible.builtin.command: pvesh get /cluster/status --output-format json
+  delegate_to: "{{ reinstall_remaining_hosts | first | default(inventory_hostname) }}"
+  run_once: true
+  register: reinstall_cluster_status
+  changed_when: false
+  check_mode: false
+  when: reinstall_remaining_hosts | length > 0
+
+- name: Assert that the remaining nodes keep quorum
+  vars:
+    reinstall_status: "{{ reinstall_cluster_status.stdout | default('[]') | from_json }}"
+    reinstall_members: "{{ reinstall_status | selectattr('type', 'eq', 'node') | map(attribute='name') | list }}"
+    reinstall_leaving: >-
+      {{ ansible_play_hosts_all | map('extract', hostvars) | map(attribute='reinstall_pve_node')
+         | select('in', reinstall_members) | list }}
+  ansible.builtin.assert:
+    that: (reinstall_members | length - reinstall_leaving | length) * 2 > reinstall_members | length
+    fail_msg: >-
+      Reinstalling {{ reinstall_leaving | join(', ') }} leaves {{ reinstall_members | length - reinstall_leaving | length }}
+      of {{ reinstall_members | length }} cluster nodes, which is no majority; the rest of the cluster would lose
+      quorum. Reinstall fewer nodes at once, or all of them.
+    quiet: true
+  run_once: true
+  when:
+    - reinstall_remaining_hosts | length > 0
+    - reinstall_status | selectattr('type', 'eq', 'cluster') | list | length > 0

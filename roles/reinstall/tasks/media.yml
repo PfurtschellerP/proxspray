@@ -1,0 +1,91 @@
+---
+- name: Find the installer stick
+  ansible.builtin.import_tasks: detect.yml
+
+- name: Read the image on the stick
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      head --bytes={{ reinstall_iso_stat.stat.size }} {{ reinstall_stick.path | quote }} | sha256sum
+    executable: /bin/bash
+  register: reinstall_stick_checksum
+  changed_when: false
+  check_mode: false
+
+- name: Note whether the stick is up to date
+  ansible.builtin.set_fact:
+    reinstall_stick_current: "{{ (reinstall_stick_checksum.stdout.split() | first) == reinstall_iso_stat.stat.checksum }}"
+
+- name: Assert that the stick is up to date
+  ansible.builtin.assert:
+    that: reinstall_stick_current or reinstall_update_media | bool
+    fail_msg: >-
+      The stick in {{ inventory_hostname }} ({{ reinstall_stick.path }}) does not hold {{ reinstall_iso }}.
+      Write it to the stick or set reinstall_update_media=true.
+    quiet: true
+
+- name: Update the stick
+  when: not reinstall_stick_current
+  block:
+    - name: Copy the node ISO to the node
+      ansible.builtin.copy:
+        src: "{{ reinstall_iso }}"
+        dest: "{{ reinstall_iso_tmp }}"
+        owner: root
+        group: root
+        mode: "0600"
+
+    - name: Write the node ISO to the stick
+      ansible.builtin.command:
+        argv:
+          - dd
+          - if={{ reinstall_iso_tmp }}
+          - of={{ reinstall_stick.path }}
+          - bs=4M
+          - conv=fsync
+          - oflag=direct
+          - status=none
+      changed_when: true
+
+    - name: Re-read the partition table of the stick
+      ansible.builtin.command:
+        argv:
+          - blockdev
+          - --rereadpt
+          - "{{ reinstall_stick.path }}"
+      changed_when: false
+
+    - name: Wait for udev to pick up the new partitions
+      ansible.builtin.command: udevadm settle
+      changed_when: false
+
+  always:
+    - name: Remove the copy of the node ISO
+      ansible.builtin.file:
+        path: "{{ reinstall_iso_tmp }}"
+        state: absent
+
+- name: Check the written stick
+  when:
+    - not reinstall_stick_current
+    - not ansible_check_mode
+  block:
+    - name: Find the updated stick
+      ansible.builtin.import_tasks: detect.yml
+
+    - name: Read the image on the updated stick
+      ansible.builtin.shell:
+        cmd: |
+          set -euo pipefail
+          head --bytes={{ reinstall_iso_stat.stat.size }} {{ reinstall_stick.path | quote }} | sha256sum
+        executable: /bin/bash
+      register: reinstall_stick_checksum
+      changed_when: false
+
+    - name: Assert that the stick holds the node ISO
+      ansible.builtin.assert:
+        that: (reinstall_stick_checksum.stdout.split() | first) == reinstall_iso_stat.stat.checksum
+        fail_msg: >-
+          {{ reinstall_stick.path }} on {{ inventory_hostname }} does not read back as {{ reinstall_iso | basename }}
+          after writing it; the stick may be faulty.
+        quiet: true

@@ -1,0 +1,17 @@
+---
+# Builds one unattended installer ISO per node on the controller. Runs from a
+# checkout (`ansible-playbook install_media.yml`) and from the installed
+# collection (`ansible-playbook pfurtschellerp.proxspray.install_media`).
+
+- name: Check Ansible version
+  ansible.builtin.import_playbook: ansible_version.yml
+
+# Nodes are only contacted to keep their current SSH host keys; unreachable
+# nodes (e.g. blank machines) are fine.
+- name: Build installation media
+  hosts: all
+  gather_facts: false
+  become: false
+  roles:
+    - role: install_media
+      tags: install_media

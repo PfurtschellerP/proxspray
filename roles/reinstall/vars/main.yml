@@ -1,0 +1,12 @@
+---
+# Proxmox VE node name (the short hostname).
+reinstall_node_name: "{{ ansible_facts.hostname | default(inventory_hostname) }}"
+
+# Inventory hosts that are not reinstalled and keep the cluster running.
+reinstall_remaining_hosts: "{{ groups['all'] | reject('in', ansible_play_hosts_all) | list }}"
+
+reinstall_esp_type: c12a7328-f81f-11d2-ba4b-00a0c93ec93b
+reinstall_loader: \EFI\BOOT\BOOTX64.EFI
+
+# [[number, label, device path], ...] from `efibootmgr --verbose`.
+reinstall_efi_pattern: '^Boot([0-9A-Fa-f]{4})\*? ([^\t]*)\t(.*)$'

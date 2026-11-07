@@ -1,0 +1,81 @@
+---
+- name: Validate node identity and network
+  ansible.builtin.assert:
+    that:
+      - install_media_fqdn is match('^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$')
+      - install_media_ip is match(install_media_ipv4_pattern)
+      - install_media_prefix | int in range(1, 33)
+      - install_media_gateway is match(install_media_ipv4_pattern)
+      - install_media_dns is match(install_media_ipv4_pattern)
+      - install_media_interface_filter is mapping
+      - install_media_interface_filter | length > 0
+      - install_media_interface_filter.values() | map('string') | select | list | length == install_media_interface_filter | length
+    fail_msg: >-
+      {{ inventory_hostname }} needs a lowercase FQDN (install_media_domain, got '{{ install_media_fqdn }}'),
+      an IPv4 address with prefix (got '{{ install_media_ip }}/{{ install_media_prefix }}'), a gateway
+      (install_media_gateway, got '{{ install_media_gateway }}'), a DNS server (install_media_dns, got
+      '{{ install_media_dns }}') and install_media_interface_filter to select the management interface
+      (got {{ install_media_interface_filter }}), e.g. {ID_NET_NAME_PATH: enp86s0} for all nodes or node_mac per host.
+    quiet: true
+
+- name: Validate disk and system settings
+  ansible.builtin.assert:
+    that:
+      - (install_media_disk_list | length > 0) != (install_media_disk_filter | length > 0)
+      - install_media_disk_list is sequence and install_media_disk_list is not string
+      - install_media_disk_filter is mapping
+      - install_media_disk_filter_match in ['any', 'all']
+      - install_media_filesystem in ['ext4', 'xfs', 'zfs', 'btrfs']
+      - install_media_filesystem_options is mapping
+      - install_media_wipe_disks is boolean
+      - install_media_interface_names is mapping
+      - install_media_keyboard | length > 0
+      - install_media_country is match('^[a-z]{2}$')
+      - install_media_timezone | length > 0
+    fail_msg: >-
+      Set exactly one of install_media_disk_list (got {{ install_media_disk_list }}) and install_media_disk_filter
+      (got {{ install_media_disk_filter }}); the installer wipes the disks they select. install_media_filesystem must be
+      ext4, xfs, zfs or btrfs (got '{{ install_media_filesystem }}') and install_media_country a two-letter code
+      (got '{{ install_media_country }}').
+    quiet: true
+
+- name: Validate root credentials
+  ansible.builtin.assert:
+    that:
+      - install_media_root_password_hash is match('^\$[0-9a-z]+\$')
+      - install_media_root_ssh_keys is sequence and install_media_root_ssh_keys is not string
+      - install_media_root_ssh_keys | length > 0
+      - install_media_root_ssh_keys | select('match', '^(ssh-|ecdsa-|sk-)') | list | length == install_media_root_ssh_keys | length
+    fail_msg: >-
+      install_media_root_password_hash must be a crypt hash (e.g. from `openssl passwd -6`) and
+      install_media_root_ssh_keys a list of at least one public key (e.g. from `ssh-add -L`), which Ansible
+      needs to log in after the installation.
+    quiet: true
+  no_log: true
+
+- name: Check the installer tools on the controller
+  ansible.builtin.command:
+    argv:
+      - "{{ install_media_tool }}"
+      - --version
+  loop:
+    - proxmox-auto-install-assistant
+    - xorriso
+  loop_control:
+    loop_var: install_media_tool
+  delegate_to: localhost
+  run_once: true
+  register: install_media_tools
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Assert that the installer tools are available
+  ansible.builtin.assert:
+    that: install_media_tools.results | selectattr('rc', 'ne', 0) | list | length == 0
+    fail_msg: >-
+      {{ install_media_tools.results | selectattr('rc', 'ne', 0) | map(attribute='install_media_tool') | join(' and ') }}
+      not found on the controller. The Dev Container includes them; on Debian, add the Proxmox VE repository and
+      `apt install proxmox-auto-install-assistant xorriso`.
+    quiet: true
+  run_once: true

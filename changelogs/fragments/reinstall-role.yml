@@ -1,0 +1,3 @@
+---
+major_changes:
+  - reinstall - new role and ``reinstall.yml`` playbook that reinstall nodes from a USB stick that stays plugged in. It rewrites outdated sticks, adds a UEFI boot entry for the stick outside the boot order, boots it once with ``BootNext``, waits for the new system and checks it. Safeguards - an explicit ``reinstall_confirm``, no guests on the node, the system disk first in the boot order and quorum of the remaining cluster; reinstalled nodes are removed from the cluster so ``setup.yml`` can join them again.

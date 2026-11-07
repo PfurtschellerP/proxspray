@@ -1,0 +1,56 @@
+{{ ansible_managed | comment }}
+# Answer file for the Proxmox VE automated installer of {{ inventory_hostname }}.
+# https://pve.proxmox.com/wiki/Automated_Installation
+
+[global]
+keyboard = {{ install_media_keyboard | to_json }}
+country = {{ install_media_country | to_json }}
+fqdn = {{ install_media_fqdn | to_json }}
+mailto = {{ install_media_mailto | to_json }}
+timezone = {{ install_media_timezone | to_json }}
+root-password-hashed = {{ install_media_root_password_hash | to_json }}
+root-ssh-keys = {{ install_media_root_ssh_keys | to_json }}
+{% if install_media_subscription_key | length > 0 %}
+subscription-key = {{ install_media_subscription_key | to_json }}
+{% endif %}
+reboot-on-error = false
+
+[network]
+source = "from-answer"
+cidr = {{ (install_media_ip ~ '/' ~ install_media_prefix) | to_json }}
+gateway = {{ install_media_gateway | to_json }}
+dns = {{ install_media_dns | to_json }}
+{% for key, value in install_media_interface_filter | dictsort %}
+filter.{{ key | to_json }} = {{ value | string | to_json }}
+{% endfor %}
+{% if install_media_pin_interface_names | bool %}
+
+[network.interface-name-pinning]
+enabled = true
+{%   if install_media_interface_names | length > 0 %}
+
+[network.interface-name-pinning.mapping]
+{%     for mac, name in install_media_interface_names | dictsort %}
+{{ mac | lower | to_json }} = {{ name | to_json }}
+{%     endfor %}
+{%   endif %}
+{% endif %}
+
+[disk-setup]
+filesystem = {{ install_media_filesystem | to_json }}
+{% if install_media_disk_list | length > 0 %}
+disk-list = {{ install_media_disk_list | to_json }}
+{% else %}
+filter-match = {{ install_media_disk_filter_match | to_json }}
+{%   for key, value in install_media_disk_filter | dictsort %}
+filter.{{ key | to_json }} = {{ value | string | to_json }}
+{%   endfor %}
+{% endif %}
+{% for key, value in install_media_filesystem_options | dictsort %}
+{{ install_media_filesystem_section }}.{{ key | to_json }} = {{ value | to_json }}
+{% endfor %}
+
+# Restores the node's SSH host keys before sshd starts.
+[first-boot]
+source = "from-iso"
+ordering = "before-network"

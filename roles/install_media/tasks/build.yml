@@ -1,0 +1,87 @@
+---
+- name: Render the answer file
+  ansible.builtin.template:
+    src: answer.toml.j2
+    dest: "{{ install_media_answer }}"
+    mode: "0600"
+  delegate_to: localhost
+  when: install_media_keys_ready
+  register: install_media_answer_file
+
+- name: Render the first-boot hook
+  ansible.builtin.template:
+    src: first-boot.sh.j2
+    dest: "{{ install_media_first_boot }}"
+    mode: "0700"
+  delegate_to: localhost
+  when: install_media_keys_ready
+  register: install_media_first_boot_file
+  no_log: true
+
+- name: Validate the answer file
+  ansible.builtin.command:
+    argv:
+      - proxmox-auto-install-assistant
+      - validate-answer
+      - "{{ install_media_answer }}"
+  delegate_to: localhost
+  changed_when: false
+  when: not ansible_check_mode
+
+# prepare-iso embeds timestamps, so the ISO is rebuilt only when its inputs
+# change; the stamp records the inputs of the last successful build.
+- name: Check the current ISO
+  ansible.builtin.stat:
+    path: "{{ install_media_iso }}"
+    get_checksum: false
+  delegate_to: localhost
+  register: install_media_iso_stat
+
+- name: Determine whether the ISO is up to date
+  ansible.builtin.set_fact:
+    install_media_build_id: >-
+      {{ [install_media_iso_checksum,
+          install_media_answer_file.checksum | default(''),
+          install_media_first_boot_file.checksum | default('')]
+         | join(' ') | hash('sha256') }}
+    install_media_current_build_id: >-
+      {{ lookup('ansible.builtin.file', install_media_build_stamp, errors='ignore') | default('', true) | trim
+         if install_media_iso_stat.stat.exists else '' }}
+
+- name: Build the ISO
+  ansible.builtin.command:
+    argv:
+      - proxmox-auto-install-assistant
+      - prepare-iso
+      - "{{ install_media_iso_source }}"
+      - --fetch-from
+      - iso
+      - --answer-file
+      - "{{ install_media_answer }}"
+      - --on-first-boot
+      - "{{ install_media_first_boot }}"
+      - --tmp
+      - "{{ install_media_workdir }}"
+      - --output
+      - "{{ install_media_iso }}"
+  delegate_to: localhost
+  when:
+    - install_media_keys_ready
+    - install_media_build_id != install_media_current_build_id
+  changed_when: true
+  register: install_media_build
+
+- name: Restrict access to the ISO
+  ansible.builtin.file:
+    path: "{{ install_media_iso }}"
+    mode: "0600"
+  delegate_to: localhost
+  when: install_media_build is not skipped
+
+- name: Record the build inputs
+  ansible.builtin.copy:
+    content: "{{ install_media_build_id }}\n"
+    dest: "{{ install_media_build_stamp }}"
+    mode: "0600"
+  delegate_to: localhost
+  when: install_media_build is not skipped

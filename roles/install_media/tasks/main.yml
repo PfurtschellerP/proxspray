@@ -1,0 +1,20 @@
+---
+# Everything runs on the controller; the nodes are only contacted to read
+# their current SSH host keys.
+- name: Validate installation media configuration
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Download the Proxmox VE ISO
+  ansible.builtin.import_tasks: iso.yml
+
+- name: Prepare SSH host keys
+  ansible.builtin.import_tasks: host_keys.yml
+
+- name: Build the installation media
+  ansible.builtin.import_tasks: build.yml
+
+- name: Verify the installation media
+  ansible.builtin.import_tasks: verify.yml
+  when:
+    - install_media_verify | bool
+    - not ansible_check_mode

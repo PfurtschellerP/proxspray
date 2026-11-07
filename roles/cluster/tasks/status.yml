@@ -23,6 +23,26 @@
     cluster_init_members: >-
       {{ cluster_init_status.stdout | from_json | selectattr('type', 'eq', 'node') | map(attribute='name') | list }}
 
+# The links a joining node needs addresses for; other roles can add links
+# after the cluster was created (e.g. the fabric as link 1).
+- name: Get the corosync links of the cluster
+  ansible.builtin.command: pvesh get /cluster/config/nodes --output-format json
+  register: cluster_config_nodes
+  changed_when: false
+  check_mode: false
+  delegate_to: "{{ cluster_init_node }}"
+  run_once: true
+  when: cluster_init_name == cluster_name
+
+- name: Note the corosync links of the cluster
+  ansible.builtin.set_fact:
+    cluster_existing_links: >-
+      {{ cluster_config_nodes.stdout | default('[]') | from_json
+         | map('dict2items') | flatten | map(attribute='key')
+         | select('match', '^ring[0-9]+_addr$')
+         | map('regex_replace', '^ring', '') | map('regex_replace', '_addr$', '') | map('int')
+         | unique | sort }}
+
 - name: Assert that the init node is not part of another cluster
   ansible.builtin.assert:
     that: cluster_init_name in ['', cluster_name]

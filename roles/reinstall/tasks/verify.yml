@@ -1,0 +1,28 @@
+---
+- name: Read the new machine ID
+  ansible.builtin.slurp:
+    src: /etc/machine-id
+  register: reinstall_new_machine_id
+
+- name: Read the UEFI boot entries of the new system
+  ansible.builtin.import_tasks: boot_entries.yml
+
+- name: Get the Proxmox VE version
+  ansible.builtin.command: pveversion
+  register: reinstall_pveversion
+  changed_when: false
+
+- name: Assert that the node runs a fresh installation from its disk
+  ansible.builtin.assert:
+    that:
+      - reinstall_new_machine_id.content != reinstall_old_machine_id.content
+      - reinstall_boot_current != reinstall_boot_entry
+    fail_msg: >-
+      {{ inventory_hostname }} came back without being reinstalled (same machine ID) or booted from the stick
+      (Boot{{ reinstall_boot_current }}). The firmware may have ignored BootNext or rejected the stick (Secure Boot);
+      watch the console and check the installer log in /tmp/auto_installer on the installer system.
+    quiet: true
+
+- name: Show the installed version
+  ansible.builtin.debug:
+    msg: "{{ inventory_hostname }} runs {{ reinstall_pveversion.stdout }}. Run setup.yml to configure it."

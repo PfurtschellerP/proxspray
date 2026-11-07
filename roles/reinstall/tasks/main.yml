@@ -1,0 +1,21 @@
+---
+- name: Validate the reinstall
+  ansible.builtin.import_tasks: validate.yml
+
+- name: Prepare the installation media
+  ansible.builtin.import_tasks: media.yml
+
+- name: Prepare the one-time boot from the stick
+  ansible.builtin.import_tasks: boot.yml
+
+- name: Reinstall the node
+  ansible.builtin.import_tasks: install.yml
+
+- name: Remove the old nodes from the cluster
+  ansible.builtin.import_tasks: cluster.yml
+
+- name: Verify the reinstall
+  ansible.builtin.import_tasks: verify.yml
+  when:
+    - reinstall_verify | bool
+    - not ansible_check_mode

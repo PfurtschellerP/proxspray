@@ -1,0 +1,30 @@
+---
+# Comma-separated, sorted names of the hosts to reinstall, as a safeguard. The
+# reinstall WIPES them; the validation prints the exact value to pass, e.g.
+# `-e reinstall_confirm=node-1,node-2,node-3`.
+reinstall_confirm: ""
+
+# Node ISO built by the install_media role (install_media_dest/<host>.iso).
+reinstall_iso: "{{ inventory_dir }}/artifacts/install-media/{{ inventory_hostname }}.iso"
+
+# Write reinstall_iso to the node's stick when the stick holds something else,
+# e.g. an older build or a plain Proxmox VE ISO. Without it, an outdated stick
+# stops the reinstall.
+reinstall_update_media: true
+
+# Temporary copy of the ISO on the node while the stick is written.
+reinstall_iso_tmp: /var/tmp/proxspray-install-media.iso
+
+# Label of the UEFI boot entry for the stick. The entry is not part of the
+# boot order; it is only selected once with BootNext.
+reinstall_boot_entry_label: proxspray-reinstall
+
+# Reinstall nodes that still have VMs or containers; they are lost.
+reinstall_destroy_guests: false
+
+# Seconds to wait for the reinstalled node to come back (installation, reboot
+# and first boot).
+reinstall_timeout: 1800
+
+# Check that the node runs a fresh installation afterwards.
+reinstall_verify: true

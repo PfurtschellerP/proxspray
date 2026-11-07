@@ -1,0 +1,47 @@
+---
+- name: List block devices
+  ansible.builtin.command: lsblk --json --list --paths --output PATH,PKNAME,TYPE,TRAN,FSTYPE,LABEL,PARTTYPE,PARTUUID,PARTN,MOUNTPOINTS
+  register: reinstall_lsblk
+  changed_when: false
+  check_mode: false
+
+# A stick written with any Proxmox VE ISO is a whole-disk ISO 9660 file system
+# labelled PVE, with the EFI system partition inside. A flat list with PKNAME
+# links partitions to their disk.
+- name: Find the installer stick
+  vars:
+    reinstall_devices: "{{ (reinstall_lsblk.stdout | from_json).blockdevices }}"
+    reinstall_sticks: >-
+      {{ reinstall_devices
+         | selectattr('type', 'eq', 'disk')
+         | selectattr('tran', 'eq', 'usb')
+         | selectattr('fstype', 'eq', 'iso9660')
+         | selectattr('label', 'eq', 'PVE')
+         | list }}
+  ansible.builtin.set_fact:
+    reinstall_sticks_found: "{{ reinstall_sticks | map(attribute='path') | list }}"
+    reinstall_stick: "{{ reinstall_sticks | first | default({}) }}"
+    reinstall_stick_parts: >-
+      {{ reinstall_devices
+         | selectattr('pkname', 'eq', (reinstall_sticks | first | default({})).path | default('-'))
+         | list }}
+
+- name: Assert that exactly one installer stick is plugged in
+  ansible.builtin.assert:
+    that:
+      - reinstall_sticks_found | length == 1
+      - >-
+        reinstall_stick_parts | selectattr('parttype', 'eq', reinstall_esp_type)
+        | selectattr('partn') | selectattr('partuuid') | list | length == 1
+      - >-
+        ([reinstall_stick] + reinstall_stick_parts)
+        | map(attribute='mountpoints') | flatten | select | list | length == 0
+    fail_msg: >-
+      {{ inventory_hostname }} needs exactly one USB stick with a Proxmox VE ISO (label PVE) that is not mounted,
+      found {{ reinstall_sticks_found | join(', ') | default('none', true) }}. Write
+      {{ reinstall_iso | basename }} (or any Proxmox VE ISO) to a stick and plug it in.
+    quiet: true
+
+- name: Note the EFI system partition of the stick
+  ansible.builtin.set_fact:
+    reinstall_esp: "{{ reinstall_stick_parts | selectattr('parttype', 'eq', reinstall_esp_type) | first }}"

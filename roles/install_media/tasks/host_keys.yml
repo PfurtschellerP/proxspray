@@ -1,0 +1,109 @@
+---
+- name: Create the host key directory
+  ansible.builtin.file:
+    path: "{{ install_media_node_keys_dir }}"
+    state: directory
+    mode: "0700"
+  delegate_to: localhost
+  register: install_media_keys_dir
+
+- name: Check for stored host keys
+  ansible.builtin.stat:
+    path: "{{ install_media_node_keys_dir }}/ssh_host_{{ install_media_key.type }}_key"
+  loop: "{{ install_media_host_key_types }}"
+  loop_control:
+    loop_var: install_media_key
+    label: "{{ install_media_key.type }}"
+  delegate_to: localhost
+  register: install_media_stored_keys
+
+# Keeping the running node's keys means nobody sees a changed host key after
+# the reinstall: neither Ansible nor the other nodes of the cluster.
+- name: Check whether the node is running
+  ansible.builtin.ping:
+  when:
+    - install_media_host_keys_from_node | bool
+    - install_media_stored_keys.results | rejectattr('stat.exists') | list | length > 0
+  register: install_media_ping
+  ignore_unreachable: true
+
+- name: Read the host keys of the running node
+  ansible.builtin.slurp:
+    src: "/etc/ssh/ssh_host_{{ install_media_stored.install_media_key.type }}_key"
+  loop: "{{ install_media_stored_keys.results }}"
+  loop_control:
+    loop_var: install_media_stored
+    label: "{{ install_media_stored.install_media_key.type }}"
+  when:
+    - install_media_ping is not skipped
+    - install_media_ping is not unreachable
+    - not install_media_stored.stat.exists
+  register: install_media_node_keys
+  failed_when: false
+  no_log: true
+
+- name: Store the host keys of the running node
+  ansible.builtin.copy:
+    content: "{{ install_media_node_key.content | b64decode }}"
+    dest: "{{ install_media_node_keys_dir }}/ssh_host_{{ install_media_node_key.install_media_stored.install_media_key.type }}_key"
+    mode: "0600"
+  loop: "{{ install_media_node_keys.results | default([]) | selectattr('content', 'defined') }}"
+  loop_control:
+    loop_var: install_media_node_key
+    label: "{{ install_media_node_key.install_media_stored.install_media_key.type }}"
+  delegate_to: localhost
+  no_log: true
+
+# Generates the keys the node did not provide and the public key files.
+- name: Generate missing host keys
+  community.crypto.openssh_keypair:
+    path: "{{ install_media_node_keys_dir }}/ssh_host_{{ install_media_key.type }}_key"
+    type: "{{ install_media_key.type }}"
+    size: "{{ install_media_key.size }}"
+    comment: "root@{{ install_media_fqdn | split('.') | first }}"
+    regenerate: never
+    mode: "0600"
+  loop: "{{ install_media_host_key_types }}"
+  loop_control:
+    loop_var: install_media_key
+    label: "{{ install_media_key.type }}"
+  delegate_to: localhost
+  # In check mode, the directory of a new node does not exist yet.
+  when: not (ansible_check_mode and install_media_keys_dir is changed)
+
+# In check mode, new keys are not generated, so there is nothing to build with.
+- name: Check the public host keys
+  ansible.builtin.stat:
+    path: "{{ install_media_node_keys_dir }}/ssh_host_{{ install_media_key.type }}_key.pub"
+  loop: "{{ install_media_host_key_types }}"
+  loop_control:
+    loop_var: install_media_key
+    label: "{{ install_media_key.type }}"
+  delegate_to: localhost
+  register: install_media_public_keys
+
+- name: Note whether the host keys are complete
+  ansible.builtin.set_fact:
+    install_media_keys_ready: "{{ install_media_public_keys.results | rejectattr('stat.exists') | list | length == 0 }}"
+
+# One file, written for every node: one task at a time.
+- name: Add the host keys to known_hosts on the controller
+  ansible.builtin.known_hosts:
+    path: "{{ install_media_known_hosts }}"
+    name: "{{ install_media_known_host[0] }}"
+    key: >-
+      {{ install_media_known_host[0] }}
+      {{ lookup('ansible.builtin.file', install_media_node_keys_dir ~ '/ssh_host_' ~ install_media_known_host[1].type ~ '_key.pub')
+         | split(' ') | batch(2) | first | join(' ') }}
+  loop: >-
+    {{ [inventory_hostname, install_media_fqdn, install_media_ip]
+       | unique
+       | product(install_media_host_key_types) }}
+  loop_control:
+    loop_var: install_media_known_host
+    label: "{{ install_media_known_host[0] }} {{ install_media_known_host[1].type }}"
+  delegate_to: localhost
+  throttle: 1
+  when:
+    - install_media_keys_ready
+    - install_media_known_hosts | length > 0

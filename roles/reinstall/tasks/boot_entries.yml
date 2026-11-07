@@ -1,0 +1,22 @@
+---
+- name: List the UEFI boot entries
+  ansible.builtin.command: efibootmgr --verbose
+  register: reinstall_efibootmgr
+  changed_when: false
+  check_mode: false
+
+- name: Parse the UEFI boot entries
+  ansible.builtin.set_fact:
+    reinstall_boot_current: >-
+      {{ reinstall_efibootmgr.stdout
+         | regex_findall('^BootCurrent: *([0-9A-Fa-f]{4})', multiline=True)
+         | first | default('') | upper }}
+    reinstall_boot_order: >-
+      {{ reinstall_efibootmgr.stdout
+         | regex_findall('^BootOrder: *([0-9A-Fa-f,]+)', multiline=True)
+         | first | default('') | upper | split(',') | select | list }}
+    # [[number, label, device path], ...]
+    reinstall_boot_entries: >-
+      {{ reinstall_efibootmgr.stdout
+         | regex_findall(reinstall_efi_pattern, multiline=True)
+         | map('map', 'trim') | map('list') | list }}

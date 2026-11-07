@@ -57,9 +57,53 @@
         key: "{{ cluster_join_address | trim }} {{ (cluster_init_hostkey.content | b64decode).split()[:2] | join(' ') }}"
         state: present
 
-    # Nodes must join one after another.
-    - name: Join cluster {{ cluster_name }}
-      ansible.builtin.command:
-        argv: "{{ ['pvecm', 'add', cluster_join_address | trim, '--use_ssh', '1'] + cluster_link_args }}"
-      changed_when: true
-      throttle: 1
+    - name: Assert that this node has an address for every cluster link
+      ansible.builtin.assert:
+        that: cluster_link_numbers | reject('in', cluster_link_map.keys() | list) | list | length == 0
+        fail_msg: >-
+          Cluster '{{ cluster_name }}' uses corosync links {{ cluster_link_numbers | join(', ') }}, but
+          {{ inventory_hostname }} only has addresses for {{ cluster_link_map.keys() | sort | join(', ') }}.
+          Add the missing ones to cluster_links or cluster_join_extra_links.
+        quiet: true
+
+    # pvecm add requires every link address to exist on this node. The fabric
+    # address of a rejoining node only appears once the fabric is applied,
+    # which needs cluster membership, so it is added to lo for the join.
+    - name: Note link addresses missing on this node
+      ansible.builtin.set_fact:
+        cluster_missing_addresses: >-
+          {{ cluster_link_numbers | map('extract', cluster_link_map)
+             | reject('in', ansible_facts.all_ipv4_addresses | default([]))
+             | select('match', '^[0-9.]+$') | list }}
+
+    - name: Join the cluster
+      block:
+        - name: Add missing link addresses temporarily
+          ansible.builtin.command:
+            argv: [ip, address, add, "{{ cluster_missing_address }}/32", dev, lo]
+          loop: "{{ cluster_missing_addresses }}"
+          loop_control:
+            loop_var: cluster_missing_address
+          changed_when: true
+
+        # Nodes must join one after another. pvecm add exits with 0 even when
+        # the join is refused, so its output is checked too.
+        - name: Join cluster {{ cluster_name }}
+          ansible.builtin.command:
+            argv: "{{ ['pvecm', 'add', cluster_join_address | trim, '--use_ssh', '1'] + cluster_link_args }}"
+          register: cluster_join
+          changed_when: true
+          failed_when: >-
+            cluster_join.rc != 0
+            or 'unable to add node' in cluster_join.stdout ~ cluster_join.stderr
+            or 'join a cluster failed' in cluster_join.stdout ~ cluster_join.stderr
+          throttle: 1
+
+      always:
+        - name: Remove the temporary link addresses
+          ansible.builtin.command:
+            argv: [ip, address, del, "{{ cluster_missing_address }}/32", dev, lo]
+          loop: "{{ cluster_missing_addresses }}"
+          loop_control:
+            loop_var: cluster_missing_address
+          changed_when: true

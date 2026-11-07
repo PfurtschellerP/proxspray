@@ -2,9 +2,13 @@
 # The fabric lives in the cluster filesystem (/etc/pve/sdn), so it is
 # configured once. Changes are pending until applied, which regenerates the
 # network and FRR configuration on all nodes.
+#
+# A plain GET returns the configuration including changes not applied yet;
+# --pending returns a diff against the running configuration instead (changed
+# entries are wrapped in {"state": ..., "pending": {...}}).
 
-- name: Get pending SDN fabrics
-  ansible.builtin.command: pvesh get /cluster/sdn/fabrics/fabric --pending 1 --output-format json
+- name: Get SDN fabrics
+  ansible.builtin.command: pvesh get /cluster/sdn/fabrics/fabric --output-format json
   register: fabric_fabrics
   changed_when: false
   check_mode: false
@@ -39,8 +43,8 @@
     quiet: true
   run_once: true
 
-- name: Get pending nodes of fabric {{ fabric_name }}
-  ansible.builtin.command: pvesh get /cluster/sdn/fabrics/node/{{ fabric_name }} --pending 1 --output-format json
+- name: Get nodes of fabric {{ fabric_name }}
+  ansible.builtin.command: pvesh get /cluster/sdn/fabrics/node/{{ fabric_name }} --output-format json
   register: fabric_current_nodes
   changed_when: false
   check_mode: false
@@ -77,30 +81,29 @@
     or fabric_current_interfaces | map('split', ',') | map('sort') | map('join', ',') | sort
        != fabric_wanted_interfaces | map('split', ',') | map('sort') | map('join', ',') | sort
 
+# A node that joined the cluster after the last apply (e.g. a reinstalled
+# one) has the fabric in /etc/pve but no network or FRR configuration yet.
+- name: Check whether the fabric is applied on this node
+  ansible.builtin.stat:
+    path: /sys/class/net/{{ fabric_dummy_interface }}
+  register: fabric_applied_here
+
 # Also catches configuration left pending by an earlier, interrupted run.
-- name: Get pending and running fabric configuration
-  ansible.builtin.command: pvesh get /cluster/sdn/fabrics/all --{{ fabric_state }} 1 --output-format json
-  register: fabric_config_state
+- name: Get fabric changes that are not applied yet
+  ansible.builtin.command: pvesh get /cluster/sdn/fabrics/all --pending 1 --output-format json
+  register: fabric_config_pending
   changed_when: false
   check_mode: false
   run_once: true
-  loop:
-    - pending
-    - running
-  loop_control:
-    loop_var: fabric_state
 
 - name: Apply the SDN configuration
   vars:
-    fabric_pending: "{{ fabric_config_state.results[0].stdout | from_json }}"
-    fabric_running: "{{ fabric_config_state.results[1].stdout | from_json }}"
+    fabric_pending: "{{ fabric_config_pending.stdout | from_json }}"
   ansible.builtin.command: pvesh set /cluster/sdn
   changed_when: true
   run_once: true
   when: >-
     fabric_fabric_set is changed
     or fabric_nodes_set is changed
-    or fabric_pending.fabrics | default([]) | map('dict2items') | map('rejectattr', 'key', 'in', ['digest', 'state']) | map('items2dict') | list
-       != fabric_running.fabrics | default([]) | map('dict2items') | map('rejectattr', 'key', 'in', ['digest', 'state']) | map('items2dict') | list
-    or fabric_pending.nodes | default([]) | map('dict2items') | map('rejectattr', 'key', 'in', ['digest', 'state']) | map('items2dict') | list
-       != fabric_running.nodes | default([]) | map('dict2items') | map('rejectattr', 'key', 'in', ['digest', 'state']) | map('items2dict') | list
+    or (fabric_pending.fabrics | default([]) + fabric_pending.nodes | default([])) | selectattr('state', 'defined') | list | length > 0
+    or ansible_play_hosts | map('extract', hostvars) | map(attribute='fabric_applied_here') | rejectattr('stat.exists') | list | length > 0

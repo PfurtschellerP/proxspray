@@ -1,0 +1,21 @@
+---
+# Reinstalls nodes from the USB stick that stays plugged in, e.g.
+#   ansible-playbook reinstall.yml setup.yml -e reinstall_confirm=node-1,node-2,node-3
+# Restrict it with --limit to reinstall single nodes of a running cluster.
+
+- name: Check Ansible version
+  ansible.builtin.import_playbook: ansible_version.yml
+
+- name: Gather facts
+  ansible.builtin.import_playbook: facts.yml
+
+# Either all selected nodes are reinstalled or none: a failed check on one
+# node stops the others before anything is wiped.
+- name: Reinstall Proxmox VE
+  hosts: all
+  gather_facts: false
+  become: true
+  any_errors_fatal: true
+  roles:
+    - role: reinstall
+      tags: reinstall
