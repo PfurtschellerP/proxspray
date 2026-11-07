@@ -19,7 +19,7 @@ reboot-on-error = false
 source = "from-answer"
 cidr = {{ (install_media_ip ~ '/' ~ install_media_prefix) | to_json }}
 gateway = {{ install_media_gateway | to_json }}
-dns = {{ install_media_dns | to_json }}
+dns = {{ install_media_dns_servers | first | to_json }}
 {% for key, value in install_media_interface_filter | dictsort %}
 filter.{{ key | to_json }} = {{ value | string | to_json }}
 {% endfor %}

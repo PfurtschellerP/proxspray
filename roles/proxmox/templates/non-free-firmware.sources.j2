@@ -1,0 +1,13 @@
+{{ ansible_managed | comment }}
+# Debian's non-free-firmware component (CPU microcode); no other source enabled it.
+Types: deb
+URIs: {{ proxmox_debian_mirror }}
+Suites: {{ ansible_facts.distribution_release }} {{ ansible_facts.distribution_release }}-updates
+Components: non-free-firmware
+Signed-By: {{ proxmox_debian_keyring }}
+
+Types: deb
+URIs: {{ proxmox_debian_security_mirror }}
+Suites: {{ ansible_facts.distribution_release }}-security
+Components: non-free-firmware
+Signed-By: {{ proxmox_debian_keyring }}

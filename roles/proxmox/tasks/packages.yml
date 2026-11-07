@@ -8,5 +8,24 @@
 
 - name: Install packages
   ansible.builtin.apt:
-    name: "{{ ['chrony'] + proxmox_packages }}"
+    name: "{{ ['chrony', 'python3-venv'] + proxmox_packages }}"
     state: present
+
+# For the community.proxmox modules (local API backend), see proxmox_venv.
+- name: Install proxmoxer
+  ansible.builtin.pip:
+    name: "{{ proxmox_proxmoxer }}"
+    virtualenv: "{{ proxmox_venv }}"
+    virtualenv_command: python3 -m venv
+    virtualenv_site_packages: true
+  register: proxmox_proxmoxer_installed
+
+# The microcode is loaded from the initramfs, so it takes effect on the next boot.
+- name: Install CPU microcode
+  ansible.builtin.apt:
+    name: "{{ proxmox_microcode_package }}"
+    state: present
+  when:
+    - proxmox_cpu_microcode | bool
+    - proxmox_microcode_package | length > 0
+  notify: Report pending reboot

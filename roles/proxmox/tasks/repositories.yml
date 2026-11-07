@@ -35,6 +35,52 @@
     loop_var: proxmox_apt_file
   register: proxmox_repo_removed
 
+# Microcode packages are in Debian's non-free-firmware component. The
+# installer usually enables it; add it only when no other source does, as a
+# component listed twice makes apt warn.
+- name: Find sources with the non-free-firmware component
+  ansible.builtin.find:
+    paths: [/etc/apt, /etc/apt/sources.list.d]
+    patterns: [sources.list, "*.list", "*.sources"]
+    excludes: ["{{ proxmox_firmware_sources | basename }}"]
+    contains: '^[^#]*non-free-firmware'
+  register: proxmox_firmware_found
+  when: proxmox_cpu_microcode | bool
+
+- name: Find the Debian archive keyring
+  ansible.builtin.stat:
+    path: "{{ proxmox_keyring }}"
+  loop:
+    - /usr/share/keyrings/debian-archive-keyring.pgp
+    - /usr/share/keyrings/debian-archive-keyring.gpg
+  loop_control:
+    loop_var: proxmox_keyring
+  register: proxmox_debian_keyrings
+  when: proxmox_cpu_microcode | bool
+
+- name: Configure the non-free-firmware component
+  vars:
+    proxmox_debian_keyring: >-
+      {{ proxmox_debian_keyrings.results | selectattr('stat.exists') | map(attribute='proxmox_keyring') | first
+         | default('/usr/share/keyrings/debian-archive-keyring.gpg') }}
+  ansible.builtin.template:
+    src: non-free-firmware.sources.j2
+    dest: "{{ proxmox_firmware_sources }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: proxmox_repo_firmware
+  when:
+    - proxmox_cpu_microcode | bool
+    - proxmox_firmware_found.matched == 0
+
+- name: Remove the non-free-firmware component when another source has it
+  ansible.builtin.file:
+    path: "{{ proxmox_firmware_sources }}"
+    state: absent
+  register: proxmox_repo_firmware_removed
+  when: not proxmox_cpu_microcode | bool or proxmox_firmware_found.matched > 0
+
 - name: Check subscription status
   ansible.builtin.command: pvesubscription get
   register: proxmox_subscription
@@ -61,4 +107,5 @@
     update_cache: true
     cache_valid_time: >-
       {{ 0 if (proxmox_repo_pve is changed or proxmox_repo_ceph is changed or proxmox_repo_ceph_removed is changed
-               or proxmox_repo_removed is changed or proxmox_subscription_set is changed) else 3600 }}
+               or proxmox_repo_removed is changed or proxmox_subscription_set is changed
+               or proxmox_repo_firmware is changed or proxmox_repo_firmware_removed is changed) else 3600 }}

@@ -7,6 +7,14 @@ proxmox_node_ip: "{{ node_ip | default(ansible_facts.default_ipv4.address) }}"
 # Add all other nodes of the inventory to /etc/hosts.
 proxmox_manage_hosts: true
 
+# DNS servers of the node, at most 3, tried in order: the others are the
+# fallback when the first one fails. The installer only accepts one, so this
+# defaults to install_media_dns (a string or a list) and adds the rest after the
+# installation. Empty keeps the node's current DNS servers.
+proxmox_dns_servers: "{{ [install_media_dns | default([])] | flatten | select | list }}"
+# DNS search domain; required by Proxmox VE when the servers are set.
+proxmox_dns_search: "{{ install_media_domain | default(ansible_facts.domain) | default('', true) }}"
+
 # Proxmox VE package repository: enterprise, no-subscription or test.
 proxmox_repository: no-subscription
 
@@ -34,12 +42,29 @@ proxmox_apt_upgrade: false
 # Additional packages to install.
 proxmox_packages: []
 
+# Install the CPU microcode updates for the detected CPU (intel-microcode or
+# amd64-microcode). The kernel loads them early on every boot; they fix CPU
+# bugs and security issues that the firmware of the machine may not. Needs
+# Debian's non-free-firmware component, which is added if it is missing.
+# false leaves installed microcode packages alone.
+proxmox_cpu_microcode: true
+# Mirrors for the non-free-firmware component, if it has to be added.
+proxmox_debian_mirror: http://deb.debian.org/debian
+proxmox_debian_security_mirror: http://security.debian.org/debian-security
+
 # Timezone such as "Europe/Vienna"; leave empty to keep the current one.
 proxmox_timezone: ""
 
 # NTP servers for chrony. Empty keeps the distribution's default pool.
 # Corosync and Ceph need tightly synchronised clocks.
 proxmox_ntp_servers: []
+
+# Let the nodes also synchronise with each other (chrony peers in orphan
+# mode, over the management network). Ceph only needs the monitors' clocks to
+# agree (within 0.05 s); without peers, nodes that lose their NTP servers
+# drift apart, and Ceph warns about clock skew. With peers they keep a common
+# time until the servers are back.
+proxmox_ntp_peers: true
 
 # Hide the "No valid subscription" dialog in the web interface. The patch is
 # re-applied by an APT hook whenever proxmox-widget-toolkit is updated.

@@ -8,9 +8,14 @@
       - proxmox_packages is sequence and proxmox_packages is not string
       - proxmox_ntp_servers is sequence and proxmox_ntp_servers is not string
       - proxmox_node_ip | length > 0
+      - proxmox_dns_servers is sequence and proxmox_dns_servers is not string
+      - proxmox_dns_servers | length <= 3
+      - proxmox_dns_servers | length == 0 or proxmox_dns_search | length > 0
     fail_msg: >-
       Invalid proxmox role variables: proxmox_repository must be enterprise, no-subscription or test,
-      proxmox_ceph_repository one of those or none, proxmox_packages and proxmox_ntp_servers lists.
+      proxmox_ceph_repository one of those or none, proxmox_packages and proxmox_ntp_servers lists, and
+      proxmox_dns_servers a list of at most 3 servers with a proxmox_dns_search domain
+      (got {{ proxmox_dns_servers }}, search '{{ proxmox_dns_search }}').
     quiet: true
 
 - name: Check that Proxmox VE is installed

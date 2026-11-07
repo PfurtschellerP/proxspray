@@ -6,15 +6,16 @@
       - install_media_ip is match(install_media_ipv4_pattern)
       - install_media_prefix | int in range(1, 33)
       - install_media_gateway is match(install_media_ipv4_pattern)
-      - install_media_dns is match(install_media_ipv4_pattern)
+      - install_media_dns_servers | length in [1, 2, 3]
+      - install_media_dns_servers | select('match', install_media_ipv4_pattern) | list | length == install_media_dns_servers | length
       - install_media_interface_filter is mapping
       - install_media_interface_filter | length > 0
       - install_media_interface_filter.values() | map('string') | select | list | length == install_media_interface_filter | length
     fail_msg: >-
       {{ inventory_hostname }} needs a lowercase FQDN (install_media_domain, got '{{ install_media_fqdn }}'),
       an IPv4 address with prefix (got '{{ install_media_ip }}/{{ install_media_prefix }}'), a gateway
-      (install_media_gateway, got '{{ install_media_gateway }}'), a DNS server (install_media_dns, got
-      '{{ install_media_dns }}') and install_media_interface_filter to select the management interface
+      (install_media_gateway, got '{{ install_media_gateway }}'), 1-3 DNS servers (install_media_dns, got
+      {{ install_media_dns_servers }}) and install_media_interface_filter to select the management interface
       (got {{ install_media_interface_filter }}), e.g. {ID_NET_NAME_PATH: enp86s0} for all nodes or node_mac per host.
     quiet: true
 

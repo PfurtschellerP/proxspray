@@ -11,6 +11,9 @@
 - name: Install and upgrade packages
   ansible.builtin.import_tasks: packages.yml
 
+- name: Configure DNS servers
+  ansible.builtin.import_tasks: dns.yml
+
 - name: Configure time and time synchronisation
   ansible.builtin.import_tasks: time.yml
 

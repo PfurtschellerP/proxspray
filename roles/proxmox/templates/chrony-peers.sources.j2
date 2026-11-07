@@ -1,0 +1,5 @@
+{{ ansible_managed | comment }}
+# The other cluster nodes, see proxspray-peers.conf.
+{% for ip in proxmox_peer_ips %}
+peer {{ ip }} iburst
+{% endfor %}

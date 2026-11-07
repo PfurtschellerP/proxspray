@@ -37,6 +37,40 @@
   when: proxmox_ntp_servers | length == 0
   notify: Restart chrony
 
+# Orphan mode: while NTP servers are reachable, the nodes follow them; when
+# none is, the peers agree on a common time among themselves.
+- name: Configure the other nodes as NTP peers
+  ansible.builtin.template:
+    src: "{{ proxmox_chrony_file.src }}"
+    dest: "{{ proxmox_chrony_file.dest }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - src: chrony-peers.sources.j2
+      dest: /etc/chrony/sources.d/proxspray-peers.sources
+    - src: chrony-peers.conf.j2
+      dest: /etc/chrony/conf.d/proxspray-peers.conf
+  loop_control:
+    loop_var: proxmox_chrony_file
+    label: "{{ proxmox_chrony_file.dest }}"
+  when:
+    - proxmox_ntp_peers | bool
+    - proxmox_peer_ips | length > 0
+  notify: Restart chrony
+
+- name: Remove the NTP peers
+  ansible.builtin.file:
+    path: "{{ proxmox_chrony_file }}"
+    state: absent
+  loop:
+    - /etc/chrony/sources.d/proxspray-peers.sources
+    - /etc/chrony/conf.d/proxspray-peers.conf
+  loop_control:
+    loop_var: proxmox_chrony_file
+  when: not proxmox_ntp_peers | bool or proxmox_peer_ips | length == 0
+  notify: Restart chrony
+
 - name: Enable and start chrony
   ansible.builtin.systemd_service:
     name: chrony
