@@ -1,6 +1,6 @@
 # Official Dev Container base image: Debian 13 (trixie, same as Proxmox VE 9),
 # Python 3.14, git, openssh-client and a non-root "vscode" user.
-FROM mcr.microsoft.com/devcontainers/python:3.14-trixie
+FROM mcr.microsoft.com/devcontainers/python:3.14-trixie@sha256:66a39503cd5b53c94a57b9a235c6c9371ccf17bafd9c90369e566f638a05ac89
 
 # Tools to build the unattended installer ISOs (install_media role) from the
 # Proxmox VE repository (the keyring checksum is the one Proxmox publishes),
