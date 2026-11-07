@@ -120,12 +120,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Require a changelog fragment
+      # CI, development environment, repository tooling and docs need no fragment.
+      - name: Require a changelog fragment for code changes
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
-          if ! git diff --name-only --diff-filter=AM "$BASE_SHA"...HEAD | grep -q '^changelogs/fragments/.*\.ya\?ml$'; then
-            echo "::error::Add a changelog fragment to changelogs/fragments/ (a 'trivial' section for changes" \
-              "that need no entry) or label the PR with skip-changelog."
+          changed=$(git diff --name-only "$BASE_SHA"...HEAD)
+          exempt='^(\.github/|\.devcontainer/|scripts/|docs/|changelogs/'
+          exempt+='|justfile$|AGENTS\.md$|README\.md$|\.ansible-lint$|\.yamllint$|\.gitignore$)'
+          code=$(grep -v -E "$exempt" <<<"$changed" || true)
+          if [ -n "$code" ] && ! git diff --name-only --diff-filter=AM "$BASE_SHA"...HEAD | grep -q '^changelogs/fragments/.*\.ya\?ml$'; then
+            echo "::error::Add a changelog fragment to changelogs/fragments/ for the code changes in:" $code \
+              "(or label the PR with skip-changelog)."
             exit 1
           fi

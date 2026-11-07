@@ -126,12 +126,14 @@ formatting. This file only lists what the linters don't check.
 
 ## Changelog
 
-- Every change gets a fragment in `changelogs/fragments/<topic>.yml`
+- Every code change gets a fragment in `changelogs/fragments/<topic>.yml`
   ([antsibull-changelog](https://ansible.readthedocs.io/projects/antsibull-changelog/changelogs/)).
+  CI, the Dev Container, repository tooling (`scripts/`, `justfile`, linter
+  configuration) and docs get none; CI only requires a fragment for other files.
 - Entries start with the affected role or file (`thunderbolt - ...`), are full
   sentences and wrap code in double backticks.
 - Sections: `major_changes` for new roles, `minor_changes` for new options,
-  `bugfixes`, `breaking_changes`; use `trivial` for CI and tooling.
+  `bugfixes`, `breaking_changes`.
 - Nothing has been released yet, so fragments describe features, not fixes to
   unreleased code.
 
@@ -163,4 +165,5 @@ Proxmox VE cannot run in a container.
 
 - Conventional commits with the role as scope, e.g. `feat(fabric): ...`,
   `fix(thunderbolt): ...`, `docs: ...`, `refactor(devcontainer): ...`.
-- Only commit when asked.
+- Only commit when asked. Pull requests are opened with `gh pr create` (from
+  the Dev Container) once a branch is pushed.
