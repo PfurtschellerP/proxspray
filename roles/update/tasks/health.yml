@@ -1,0 +1,38 @@
+---
+# Healthy: quorate cluster with all nodes online and, with Ceph, all OSDs up
+# and all PGs active+clean without other health warnings than the noout flag.
+# Waits up to update_health_timeout (update_health_retries).
+
+- name: Wait for all cluster nodes to be online
+  ansible.builtin.command: pvesh get /cluster/status --output-format json
+  register: update_cluster_status
+  changed_when: false
+  check_mode: false
+  until: >-
+    update_cluster_status.rc == 0
+    and (update_cluster_status.stdout | from_json | selectattr('type', 'eq', 'cluster') | map(attribute='quorate') | first | default(0)) == 1
+    and update_cluster_status.stdout | from_json | selectattr('type', 'eq', 'node') | selectattr('online', 'eq', 1)
+        | map(attribute='name') | list | length >= update_node_names | length
+  retries: "{{ update_health_retries }}"
+  delay: 10
+
+- name: Check whether Ceph is configured
+  ansible.builtin.stat:
+    path: /etc/pve/ceph.conf
+  register: update_ceph_conf
+
+- name: Wait for Ceph to be healthy
+  vars:
+    update_ceph: "{{ update_ceph_status.stdout | default('{}', true) | from_json }}"
+  ansible.builtin.command: ceph status --format json
+  register: update_ceph_status
+  changed_when: false
+  check_mode: false
+  until: >-
+    update_ceph_status.rc == 0
+    and update_ceph.osdmap.num_up_osds | default(-1) == update_ceph.osdmap.num_osds | default(0)
+    and update_ceph.pgmap.pgs_by_state | default([]) | rejectattr('state_name', 'eq', 'active+clean') | list | length == 0
+    and update_ceph.health.checks | default({}) | list | reject('in', update_ceph_allowed_checks) | list | length == 0
+  retries: "{{ update_health_retries }}"
+  delay: 10
+  when: update_ceph_conf.stat.exists

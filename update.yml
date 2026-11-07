@@ -1,0 +1,3 @@
+---
+- name: Update nodes
+  ansible.builtin.import_playbook: playbooks/update.yml

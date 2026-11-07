@@ -1,0 +1,104 @@
+---
+# First play of update.yml, on all nodes at once: checks the cluster and finds
+# out what each node needs, before anything changes.
+
+- name: Validate update variables
+  ansible.builtin.assert:
+    that:
+      - update_reboot in ['auto', 'always', 'never']
+      - update_memory_reserve | int >= 0
+      - update_node_names | unique | length == groups['all'] | length
+    fail_msg: >-
+      update_reboot must be auto, always or never (got '{{ update_reboot }}'), update_memory_reserve a number of MiB
+      and every inventory host a distinct Proxmox VE node (got {{ update_node_names }}).
+    quiet: true
+  run_once: true
+
+- name: Check the cluster health
+  vars:
+    update_health_retries: 6
+  ansible.builtin.import_tasks: health.yml
+
+- name: List the running tasks of this node
+  ansible.builtin.command: pvesh get /nodes/{{ update_node }}/tasks --source active --output-format json
+  register: update_active_tasks
+  changed_when: false
+  check_mode: false
+
+# A backup or replication would be cut off by the migration or the reboot.
+- name: Assert that no backup or replication is running
+  vars:
+    update_blocking: "{{ update_active_tasks.stdout | from_json | selectattr('type', 'in', ['vzdump', 'replication']) | list }}"
+  ansible.builtin.assert:
+    that: update_blocking | length == 0
+    fail_msg: >-
+      {{ update_node }} is running {{ update_blocking | map(attribute='type') | join(', ') }}
+      ({{ update_blocking | map(attribute='upid') | join(', ') }}); update when it is done.
+    quiet: true
+
+- name: Read the HA status
+  ansible.builtin.command: pvesh get /cluster/ha/status/current --output-format json
+  register: update_ha_status
+  changed_when: false
+  check_mode: false
+  run_once: true
+
+- name: Assert that no HA resource is in an error state
+  vars:
+    update_ha_errors: >-
+      {{ update_ha_status.stdout | from_json | selectattr('type', 'eq', 'service')
+         | selectattr('state', 'defined') | selectattr('state', 'eq', 'error') | map(attribute='sid') | list }}
+  ansible.builtin.assert:
+    that: update_ha_errors | length == 0
+    fail_msg: "HA resources {{ update_ha_errors | join(', ') }} are in the error state; fix them first (ha-manager status)."
+    quiet: true
+  run_once: true
+
+- name: Refresh the package lists
+  ansible.builtin.apt:
+    update_cache: true
+  changed_when: false
+
+# There is no module that only lists pending upgrades.
+- name: List pending upgrades
+  ansible.builtin.command: apt-get --simulate --quiet dist-upgrade  # noqa command-instead-of-module
+  register: update_simulation
+  changed_when: false
+  check_mode: false
+
+- name: List the installed kernels
+  ansible.builtin.find:
+    paths: /boot
+    patterns: vmlinuz-*
+  register: update_kernels
+
+- name: Check whether a reboot is requested
+  ansible.builtin.stat:
+    path: /run/reboot-required
+  register: update_reboot_required
+
+- name: Note what this node needs
+  vars:
+    update_newest_kernel: >-
+      {{ update_kernels.files | map(attribute='path') | map('basename') | map('regex_replace', '^vmlinuz-', '')
+         | community.general.version_sort | last | default(ansible_facts.kernel) }}
+  ansible.builtin.set_fact:
+    update_packages: "{{ update_simulation.stdout_lines | select('match', '^Inst ') | map('split') | map(attribute=1) | list }}"
+    update_kernel_pending: "{{ update_newest_kernel != ansible_facts.kernel }}"
+    update_reboot_pending: "{{ update_newest_kernel != ansible_facts.kernel or update_reboot_required.stat.exists }}"
+
+- name: Note whether this node is updated
+  ansible.builtin.set_fact:
+    update_needed: >-
+      {{ update_force | bool
+         or update_packages | length > 0
+         or (update_reboot == 'auto' and update_reboot_pending) }}
+
+- name: Show the update plan
+  ansible.builtin.debug:
+    msg: >-
+      {{ update_node }}:
+      {{ update_packages | length }} package(s) to upgrade
+      {{- (' (' ~ update_packages[:8] | join(', ') ~ (', ...' if update_packages | length > 8) ~ ')') if update_packages }},
+      reboot {{ 'pending (running ' ~ ansible_facts.kernel ~ ')' if update_reboot_pending else 'not pending' }}
+      → {{ 'update' if update_needed else 'skip' }}

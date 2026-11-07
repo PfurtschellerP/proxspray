@@ -1,0 +1,120 @@
+---
+- name: List the HA resources
+  ansible.builtin.command: pvesh get /cluster/ha/resources --output-format json
+  register: update_ha_resources
+  changed_when: false
+  check_mode: false
+
+- name: List the guests of the cluster
+  ansible.builtin.command: pvesh get /cluster/resources --type vm --output-format json
+  register: update_guests
+  changed_when: false
+  check_mode: false
+
+- name: List the nodes of the cluster
+  ansible.builtin.command: pvesh get /cluster/resources --type node --output-format json
+  register: update_nodes
+  changed_when: false
+  check_mode: false
+
+# HA guests are moved by HA maintenance mode, the others are migrated here, each
+# to the other node with the most free memory at that point.
+- name: Plan the migrations
+  vars:
+    update_ha_sids: "{{ update_ha_resources.stdout | from_json | map(attribute='sid') | list }}"
+    update_running: >-
+      {{ update_guests.stdout | from_json | selectattr('node', 'eq', update_node)
+         | selectattr('status', 'eq', 'running') | rejectattr('template', 'eq', 1) | list }}
+    update_targets: >-
+      {{ update_nodes.stdout | from_json | selectattr('node', 'ne', update_node)
+         | selectattr('status', 'eq', 'online') | list }}
+  ansible.builtin.set_fact:
+    update_guest_memory: "{{ update_running | map(attribute='maxmem') | map('int') | sum }}"
+    update_free_memory: >-
+      {{ update_targets | map(attribute='maxmem') | map('int') | sum
+         - update_targets | map(attribute='mem') | map('int') | sum
+         - update_targets | length * update_memory_reserve | int * 1048576 }}
+    update_migrations: >-
+      {%- set free = {} -%}
+      {%- for node in update_targets -%}
+      {%-   set _ = free.update({node.node: node.maxmem | int - node.mem | int}) -%}
+      {%- endfor -%}
+      {%- set plan = [] -%}
+      {%- for guest in update_running | sort(attribute='maxmem', reverse=true) -%}
+      {#-   HA resource IDs are vm:<id> and ct:<id>. -#}
+      {%-   set sid = {'qemu': 'vm', 'lxc': 'ct'}[guest.type] ~ ':' ~ guest.vmid -%}
+      {%-   if sid not in update_ha_sids and free | length > 0 -%}
+      {%-     set target = (free | dictsort(by='value') | last)[0] -%}
+      {%-     set _ = plan.append({'vmid': guest.vmid, 'type': guest.type, 'name': guest.name | default(''),
+                                   'target': target, 'origin': update_node}) -%}
+      {%-     set _ = free.update({target: free[target] - guest.maxmem | int}) -%}
+      {%-   endif -%}
+      {%- endfor -%}
+      {{ plan }}
+
+- name: Assert that the guests fit on the other nodes
+  ansible.builtin.assert:
+    that: update_guest_memory | int <= update_free_memory | int
+    fail_msg: >-
+      The running guests of {{ update_node }} need {{ (update_guest_memory | int / 1073741824) | round(1) }} GiB, but
+      the other nodes have {{ (update_free_memory | int / 1073741824) | round(1) }} GiB free after keeping
+      {{ update_memory_reserve }} MiB each. Stop guests or lower update_memory_reserve.
+    quiet: true
+
+- name: Show the migrations
+  ansible.builtin.debug:
+    msg: >-
+      {{ update_node }}: HA maintenance mode moves the HA guests;
+      {% for m in update_migrations %}{{ m.type }} {{ m.vmid }} {{ m.name }} → {{ m.target }}{{ ', ' if not loop.last }}{% else %}no
+      other running guests{% endfor %}.
+
+# Also keeps HA from moving guests back to this node until maintenance ends.
+- name: Enable HA maintenance mode
+  ansible.builtin.command:
+    argv: [ha-manager, crm-command, node-maintenance, enable, "{{ update_node }}"]
+  changed_when: true
+
+- name: Migrate VMs
+  ansible.builtin.command:
+    argv:
+      - qm
+      - migrate
+      - "{{ update_migration.vmid | string }}"
+      - "{{ update_migration.target }}"
+      - --online
+      - "1"
+      - --with-local-disks
+      - "1"
+  loop: "{{ update_migrations | selectattr('type', 'eq', 'qemu') | list }}"
+  loop_control:
+    loop_var: update_migration
+    label: "{{ update_migration.vmid }} {{ update_migration.name }} → {{ update_migration.target }}"
+  changed_when: true
+
+- name: Migrate containers
+  ansible.builtin.command:
+    argv:
+      - pct
+      - migrate
+      - "{{ update_migration.vmid | string }}"
+      - "{{ update_migration.target }}"
+      - --restart
+      - "1"
+      - --timeout
+      - "{{ update_container_shutdown_timeout | string }}"
+  loop: "{{ update_migrations | selectattr('type', 'eq', 'lxc') | list }}"
+  loop_control:
+    loop_var: update_migration
+    label: "{{ update_migration.vmid }} {{ update_migration.name }} → {{ update_migration.target }}"
+  changed_when: true
+
+- name: Wait until no guest runs on this node
+  ansible.builtin.command: pvesh get /cluster/resources --type vm --output-format json
+  register: update_guests_left
+  changed_when: false
+  until: >-
+    update_guests_left.stdout | from_json | selectattr('node', 'eq', update_node)
+    | selectattr('status', 'eq', 'running') | list | length == 0
+  retries: "{{ update_health_retries }}"
+  delay: 10
+  when: not ansible_check_mode

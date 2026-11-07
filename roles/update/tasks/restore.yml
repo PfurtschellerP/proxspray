@@ -1,0 +1,58 @@
+---
+# HA moves its guests back to their previous node when maintenance ends.
+- name: Disable HA maintenance mode
+  ansible.builtin.command:
+    argv: [ha-manager, crm-command, node-maintenance, disable, "{{ update_node }}"]
+  changed_when: true
+  when: update_migrate | bool
+
+- name: Migrate VMs back
+  ansible.builtin.command:
+    argv:
+      - qm
+      - migrate
+      - "{{ update_migration.vmid | string }}"
+      - "{{ update_migration.origin }}"
+      - --online
+      - "1"
+      - --with-local-disks
+      - "1"
+  loop: "{{ update_migrations | default([]) | selectattr('type', 'eq', 'qemu') | list }}"
+  loop_control:
+    loop_var: update_migration
+    label: "{{ update_migration.vmid }} {{ update_migration.name }} → {{ update_migration.origin }}"
+  delegate_to: "{{ update_host_of[update_migration.target] }}"
+  changed_when: true
+  when: update_migrate_back | bool
+
+- name: Migrate containers back
+  ansible.builtin.command:
+    argv:
+      - pct
+      - migrate
+      - "{{ update_migration.vmid | string }}"
+      - "{{ update_migration.origin }}"
+      - --restart
+      - "1"
+      - --timeout
+      - "{{ update_container_shutdown_timeout | string }}"
+  loop: "{{ update_migrations | default([]) | selectattr('type', 'eq', 'lxc') | list }}"
+  loop_control:
+    loop_var: update_migration
+    label: "{{ update_migration.vmid }} {{ update_migration.name }} → {{ update_migration.origin }}"
+  delegate_to: "{{ update_host_of[update_migration.target] }}"
+  changed_when: true
+  when: update_migrate_back | bool
+
+- name: Wait until HA has moved its guests
+  ansible.builtin.command: pvesh get /cluster/ha/status/current --output-format json
+  register: update_ha_settled
+  changed_when: false
+  until: >-
+    update_ha_settled.stdout | from_json | selectattr('type', 'eq', 'service')
+    | selectattr('state', 'defined') | selectattr('state', 'in', ['migrate', 'relocate', 'request_stop']) | list | length == 0
+  retries: "{{ update_health_retries }}"
+  delay: 10
+  when:
+    - update_migrate | bool
+    - not ansible_check_mode

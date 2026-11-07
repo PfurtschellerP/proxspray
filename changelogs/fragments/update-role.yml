@@ -1,0 +1,3 @@
+---
+major_changes:
+  - update - new role and ``update.yml`` playbook for rolling updates. It checks the cluster first (quorum, all nodes online, Ceph health and clean PGs, no running backup or replication, no HA errors) and plans per node (pending upgrades, a newer installed kernel). Then, one node at a time and only while the cluster is healthy, it enables HA maintenance mode, live-migrates the other VMs and restart-migrates containers to the nodes with the most free memory, sets Ceph ``noout``, upgrades, reboots when needed, waits for the cluster and Ceph to recover and moves the guests back. A failure stops the run with the node in maintenance mode.
