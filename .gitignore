@@ -1,6 +1,9 @@
 # Ansible
 .ansible
 
+# Written by antsibull-changelog
+changelogs/.plugin-cache.yaml
+
 # Files fetched from the nodes
 inventory/*/artifacts/
 

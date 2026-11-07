@@ -43,6 +43,8 @@ build_ignore:
   - dist
   - inventory/*/artifacts
   - inventory/*/credentials
+  - justfile
+  - scripts
 
 # A dict controlling use of manifest directives used in building the collection artifact. The key 'directives' is a
 # list of MANIFEST.in style

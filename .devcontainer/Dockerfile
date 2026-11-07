@@ -3,7 +3,8 @@
 FROM mcr.microsoft.com/devcontainers/python:3.14-trixie
 
 # Tools to build the unattended installer ISOs (install_media role) from the
-# Proxmox VE repository; the keyring checksum is the one Proxmox publishes.
+# Proxmox VE repository (the keyring checksum is the one Proxmox publishes),
+# and just for the recipes in the justfile.
 ARG PROXMOX_KEYRING_SHA256=136673be77aba35dcce385b28737689ad64fd785a797e57897589aed08db6e45
 RUN curl -fsSLo /usr/share/keyrings/proxmox-archive-keyring.gpg \
         https://enterprise.proxmox.com/debian/proxmox-archive-keyring-trixie.gpg \
@@ -17,6 +18,7 @@ RUN curl -fsSLo /usr/share/keyrings/proxmox-archive-keyring.gpg \
         > /etc/apt/sources.list.d/proxmox.sources \
     && apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        just \
         proxmox-auto-install-assistant \
         xorriso \
     && rm -rf /var/lib/apt/lists/*

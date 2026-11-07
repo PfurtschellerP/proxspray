@@ -1,6 +1,7 @@
 ---
 # Publishes a release when a tag "v<version>" matching galaxy.yml is pushed.
-# Prepare it with `antsibull-changelog release` (see README).
+# The changelog is prepared beforehand (`just release-prepare`, see README);
+# this workflow only reads changelogs/changelog.yaml for the release notes.
 name: Release
 
 "on":
